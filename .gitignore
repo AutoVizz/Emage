@@ -1,0 +1,2 @@
+# Published WASM bundles (copied here by EmageWasm's CMake post-build step)
+cmake-build-wasm/

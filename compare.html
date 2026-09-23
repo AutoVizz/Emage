@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Emage — Comparison: progressive vs full load</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background: #1a1a1a;
+            color: #eee;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .card {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .card h3 {
+            margin-top: 0;
+        }
+
+        canvas {
+            background: #000;
+            border: 1px solid #444;
+            display: block;
+            max-width: 100%;
+            margin: 6px auto 0;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        input, button {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: .5;
+        }
+
+        #status {
+            color: #8cf;
+            font-family: monospace;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+
+        .side-by-side {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .side {
+            flex: 1 1 320px;
+            min-width: 280px;
+        }
+
+        .side h4 {
+            margin: 4px 0 0;
+            color: #aaa;
+        }
+
+        .side .tv {
+            color: #8cf;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 4px;
+            min-height: 1.2em;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        th, td {
+            text-align: left;
+            border: 1px solid #444;
+            padding: 4px 8px;
+        }
+
+        th {
+            background: #333;
+        }
+
+        td.num {
+            text-align: right;
+        }
+
+        .verdict {
+            font-weight: 600;
+        }
+
+        .verdict.ok {
+            color: #6c6;
+        }
+
+        .verdict.bad {
+            color: #f66;
+        }
+
+        .sub {
+            color: #888;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Emage — transfer strategy comparison</h2>
+<p style="font-size: 13px; color: #aaa; margin: 0 0 12px;">
+    <a href="uploader.html">Uploader</a> ·
+    <a href="downloader.html">Progressive downloader</a> ·
+    <a href="compare.html">Comparison</a>
+</p>
+
+<div class="card">
+    <h3>0. Server connection</h3>
+    <div class="row">
+        <label>Server base URL
+            <input type="text" id="serverUrl" value="http://localhost:3233" size="30">
+        </label>
+        <label>Image path
+            <input type="text" id="imgPath" value="encrypted.j2k" size="22">
+        </label>
+        <label>AES Key (hex, 32 bytes)
+            <input type="text" id="keyInput"
+                   value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+                   size="46">
+        </label>
+        <label>AES IV (hex, 16 bytes)
+            <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="36">
+        </label>
+    </div>
+    <div class="row">
+        <button id="runBtn" disabled>Run comparison</button>
+        <label>Progressive display size
+            <input type="text" id="sizeInput" size="9" placeholder="e.g. 200, 10vw, all">
+        </label>
+        <span id="imgMeta" class="sub"></span>
+    </div>
+    <p class="sub">
+        Blank or <code>all</code> loads every quality layer. A size target (pixels, <code>vw</code>, <code>%</code>)
+        stops the progressive side once it can render at that display size, mirroring the downloader's
+        &quot;Load for size&quot;. The full side always fetches everything.
+    </p>
+</div>
+
+<div class="card">
+    <h3>1. Render — progressive (left) vs full &quot;all&quot; (right)</h3>
+    <div class="side-by-side">
+        <div class="side">
+            <h4>Progressive: N window requests</h4>
+            <canvas id="cvsProg"></canvas>
+            <div id="progTv" class="tv"></div>
+        </div>
+        <div class="side">
+            <h4>Full: single request (X-Emage-Layers: all)</h4>
+            <canvas id="cvsFull"></canvas>
+            <div id="fullTv" class="tv"></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>2. Results</h3>
+    <table id="tbl">
+        <thead>
+        <tr>
+            <th>metric</th>
+            <th>progressive</th>
+            <th>full (all)</th>
+            <th>verdict</th>
+        </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <p class="sub" style="margin: 8px 0 0;">
+        Progressive fetches the main header once, then one window per quality layer, appending packets and
+        decoding a frame at each step. Full fetches headers + all packets in a single response. Both loads
+        run in parallel from the same start time, so the fetch timings are collected under identical network
+        conditions; the full payload's decode runs after the progressive pipeline finishes painting, so a
+        long synchronous decode can't skip the intermediate progressive frames. When a display size limits
+        the progressive side, its frame is compared at that size (full raster downscaled) rather than at
+        full resolution.
+    </p>
+</div>
+
+<div class="card">
+    <h3>3. Progressive steps (per layer)</h3>
+    <table id="stepsTbl">
+        <thead>
+        <tr>
+            <th>layer</th>
+            <th>bytes fetched</th>
+            <th>cumulative bytes</th>
+            <th>cumulative ms</th>
+        </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<div id="status"></div>
+
+<script type="module">
+    import { Emage, EmageError } from './emage.js';
+
+    let emage = null;
+
+    const $ = id => document.getElementById(id);
+    const cvsProg = $('cvsProg');
+    const cvsFull = $('cvsFull');
+
+    function status(msg) {
+        $('status').textContent = msg;
+    }
+
+    function fmtErr(err) {
+        return err instanceof EmageError ? err.message : Emage.messageOf(err);
+    }
+
+    function syncConfig() {
+        emage.setServer({
+            baseUrl: $('serverUrl').value,
+            imagePath: $('imgPath').value,
+        });
+        emage.setCrypto({ key: $('keyInput').value, iv: $('ivInput').value });
+    }
+
+    Emage.init({ wasmBase: './cmake-build-wasm/' })
+        .then((m) => {
+            emage = m;
+            syncConfig();
+            $('runBtn').disabled = false;
+            status('Ready. Pick an image and run the comparison.');
+        })
+        .catch((err) => {
+            status('Failed to load WASM modules: ' + fmtErr(err));
+        });
+
+    function fmtBytes(n) {
+        if (!Number.isFinite(n)) return '?';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0, v = n;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; ++i; }
+        return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    // Count differing pixels between two canvases. When the sizes differ the
+    // larger raster is downscaled (high-quality) onto the smaller's dimensions
+    // first, so a size-limited progressive frame can be diffed against the
+    // full image rendered at the same size.
+    function canvasDiff(a, b) {
+        let da, db;
+        if (a.width === b.width && a.height === b.height) {
+            const aData = a.getContext('2d').getImageData(0, 0, a.width, a.height).data;
+            const bData = b.getContext('2d').getImageData(0, 0, a.width, a.height).data;
+            da = aData; db = bData;
+            let diff = 0;
+            for (let i = 0; i < da.length; ++i) if (da[i] !== db[i]) ++diff;
+            return { dimsMatch: true, diff };
+        }
+        const tmp = document.createElement('canvas');
+        tmp.width = a.width;
+        tmp.height = a.height;
+        const tctx = tmp.getContext('2d');
+        tctx.imageSmoothingEnabled = true;
+        tctx.imageSmoothingQuality = 'high';
+        tctx.drawImage(b, 0, 0, a.width, a.height);
+        da = a.getContext('2d').getImageData(0, 0, a.width, a.height).data;
+        db = tctx.getImageData(0, 0, a.width, a.height).data;
+        let diff = 0;
+        for (let i = 0; i < da.length; ++i) if (da[i] !== db[i]) ++diff;
+        return { dimsMatch: false, diff };
+    }
+
+    function setVerdict(cell, ok, text) {
+        cell.className = 'verdict ' + (ok ? 'ok' : 'bad');
+        cell.textContent = text;
+    }
+
+    function appendRow(metric, a, b, ok, verdict) {
+        const tbody = $('tbl').querySelector('tbody');
+        const tr = document.createElement('tr');
+        const mk = (v, num) => {
+            const td = document.createElement('td');
+            if (num) td.className = 'num';
+            td.textContent = String(v);
+            tr.appendChild(td);
+        };
+        mk(metric, false);
+        mk(a, true);
+        mk(b, true);
+        const td = document.createElement('td');
+        setVerdict(td, ok, verdict);
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+    }
+
+    $('runBtn').addEventListener('click', runCompare);
+
+    async function runCompare() {
+        syncConfig();
+        const tbodyA = $('tbl').querySelector('tbody');
+        const tbodyS = $('stepsTbl').querySelector('tbody');
+        tbodyA.innerHTML = '';
+        tbodyS.innerHTML = '';
+        cvsProg.width = cvsProg.height = cvsFull.width = cvsFull.height = 0;
+        $('progTv').textContent = '';
+        $('fullTv').textContent = '';
+        $('imgMeta').textContent = '';
+        status('Comparing (progressive and full run in parallel)...');
+
+        const stepMs = [];
+        const t0 = performance.now();
+        const base = String(emage.server.baseUrl || '').replace(/\/+$/, '');
+
+        const sizeTarget = $('sizeInput').value.trim();
+        const sizeLimited = !(sizeTarget === '' || sizeTarget === 'all' || sizeTarget === '100%');
+
+        let tProg = 0;
+        const progOpts = {
+            canvas: cvsProg,
+            onLayer: (st) => {
+                stepMs.push(performance.now() - t0);
+                $('progTv').textContent = st.complete
+                    ? `Full image (${st.totalLayers} layers)`
+                    : `Layer ${st.layer}/${st.totalLayers} preview`;
+                status(`Progressive: loaded ${st.layer}/${st.totalLayers} layers ` +
+                    `(${fmtBytes(st.assembledBytes)} transferred)`);
+            },
+        };
+        const progP = (sizeLimited
+                ? emage.display(sizeTarget, progOpts)
+                : emage.playAll(progOpts))
+            .then((p) => {
+                tProg = performance.now() - t0;
+                return p;
+            })
+            .catch((err) => {
+                status('progressive load failed: ' + fmtErr(err));
+                return null;
+            });
+
+        // Fetch both in parallel from the same t0. The full payload is only
+        // captured here; its decode is deferred until after the progressive
+        // pipeline finishes, so the long synchronous WASM decode cannot starve
+        // the browser of presenting each intermediate progressive frame.
+        const fullP = (async () => {
+            const resp = await fetch(base + '/image/' + emage.server.imagePath, {
+                headers: { 'X-Emage-Layers': 'all' },
+            });
+            const body = new Uint8Array(await resp.arrayBuffer());
+            if (!resp.ok) {
+                $('fullTv').textContent = 'FAILED: HTTP ' + resp.status;
+                return { error: 'full load failed: HTTP ' + resp.status };
+            }
+            $('fullTv').textContent = `payload received (${fmtBytes(body.length)}), decoding\u2026`;
+            return { body };
+        })();
+
+        const [prog, fullFetch] = await Promise.all([progP, fullP]);
+        if (!prog) return;
+        if (fullFetch.error) {
+            status(fullFetch.error);
+            return;
+        }
+        const { body: fullBody } = fullFetch;
+        let fullDec;
+        try {
+            fullDec = emage.decode(fullBody);
+        } catch (err) {
+            status('full load decode failed (wrong key/IV?): ' + fmtErr(err));
+            return;
+        }
+        emage.paintTo(cvsFull, fullDec);
+        const tFull = performance.now() - t0;
+
+        const meta = prog.meta;
+        $('imgMeta').textContent =
+            `${meta.width}x${meta.height}, ${meta.layers} layers, ${meta.bytes} bytes`;
+
+        // ---- metrics -------------------------------------------------------
+        const progBytes = prog.steps.reduce((a, s) => a + s.appendedBytes, 0);
+        const progRequests = prog.steps.length + 1; // meta + one window per layer
+        const progMs = tProg;
+        const fullBytes = fullBody.length;
+        const fullRequests = 1;
+        const fullMs = tFull;
+
+        const cmp = canvasDiff(cvsProg, cvsFull);
+        const dimsOk = cmp.dimsMatch;
+        const diff = cmp.diff;
+        const pixelsOk = dimsOk && diff === 0;
+
+        appendRow('bytes transferred', fmtBytes(progBytes), fmtBytes(fullBytes),
+            true, 'headers + packets vs re-framed stream');
+        appendRow('HTTP requests', progRequests, fullRequests, progRequests > 0, 'strategy');
+        appendRow('total time', progMs.toFixed(1) + ' ms', fullMs.toFixed(1) + ' ms',
+            true, 'one-shot vs layered');
+        const dimsText = (c, limited) => `${c.width}\u00d7${c.height}` + (limited ? ' (size-limited)' : '');
+        appendRow('final image', dimsText(cvsProg, sizeLimited), dimsText(cvsFull, false),
+            dimsOk, sizeLimited && dimsOk ? 'progressive is smaller' : dimsOk ? 'match' : 'MISMATCH');
+        appendRow('pixel diff', diff, '0', pixelsOk, pixelsOk ? 'IDENTICAL' : 'NON-ZERO DIFF');
+
+        // ---- per-step detail ----------------------------------------------
+        for (let i = 0; i < prog.steps.length; ++i) {
+            const s = prog.steps[i];
+            const tr = document.createElement('tr');
+            for (const text of [String(s.layer), fmtBytes(s.appendedBytes),
+                fmtBytes(s.assembledBytes), (stepMs[i] ?? 0).toFixed(1) + ' ms']) {
+                const td = document.createElement('td');
+                td.className = 'num';
+                td.textContent = text;
+                tr.appendChild(td);
+            }
+            tbodyS.appendChild(tr);
+        }
+
+        $('progTv').textContent =
+            `final ${cvsProg.width}\u00d7${cvsProg.height}${sizeLimited ? ' @ ' + sizeTarget : ''} ` +
+            `(${progBytes} B in ${progRequests} requests, ${progMs.toFixed(1)} ms)`;
+        $('fullTv').textContent =
+            `final ${fullDec.width}\u00d7${fullDec.height} ` +
+            `(${fullBytes} B in ${fullRequests} request${fullRequests === 1 ? '' : 's'}, ${fullMs.toFixed(1)} ms)`;
+
+        status(pixelsOk
+            ? (sizeLimited
+                ? 'Compare done: size-limited progressive matches the full image at that display size.'
+                : 'Comparison done: progressive and full load produce IDENTICAL pixels.')
+            : (sizeLimited
+                ? 'Comparison done: pixels DIFFER at the display size (quality layers not yet loaded).'
+                : 'Comparison done: progressive and full load DIFFER in pixels.'));
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Emage — Encrypt &amp; Upload</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background: #1a1a1a;
+            color: #eee;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .card {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .card h3 {
+            margin-top: 0;
+        }
+
+        canvas {
+            background: #000;
+            border: 1px solid #444;
+            max-width: 450px;
+            height: auto;
+            display: block;
+            margin-top: 10px;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        input, button {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: .5;
+        }
+
+        #status {
+            color: #8cf;
+            font-family: monospace;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .g-item {
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 8px;
+            padding: 8px;
+            cursor: pointer;
+            position: relative;
+            transition: border-color .15s, box-shadow .15s;
+        }
+
+        .g-item:hover { border-color: #8cf; }
+
+        .g-item.selected {
+            border-color: #4f9;
+            box-shadow: 0 0 0 2px rgba(68, 255, 153, .35);
+        }
+
+        .thumbbox {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 104px;
+            background: #111;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .thumbbox canvas.thumb {
+            display: block;
+            max-width: 100%;
+            max-height: 104px;
+            background: #111;
+        }
+
+        .g-placeholder {
+            color: #666;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .g-name {
+            font-size: 12px;
+            margin-top: 6px;
+            word-break: break-all;
+            max-height: 2.4em;
+            overflow: hidden;
+            line-height: 1.2;
+        }
+
+        .g-meta {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 2px;
+        }
+
+        .g-del {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: rgba(0, 0, 0, .55);
+            color: #f77;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            line-height: 1;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity .15s;
+        }
+
+        .g-item:hover .g-del { opacity: 1; }
+
+        .g-empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            color: #999;
+            padding: 24px 0;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Emage — encrypt &amp; upload side</h2>
+<p style="font-size: 13px; color: #aaa; margin: 0 0 12px;">
+    <a href="uploader.html">Uploader</a> ·
+    <a href="downloader.html">Progressive downloader</a> ·
+    <a href="compare.html">Comparison</a>
+</p>
+
+<div class="card">
+    <h3>0. Server connection</h3>
+    <div class="row">
+        <label>Server base URL
+            <input type="text" id="serverUrl" value="http://localhost:3233" size="30">
+        </label>
+        <label>Image path
+            <input type="text" id="imgPath" value="encrypted.j2k" size="22">
+        </label>
+        <label>Upload password
+            <input type="password" id="pwInput" size="18" value="vanilaIceCream(Totally)">
+        </label>
+    </div>
+    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
+        Leave the base URL empty to call the API same-origin (e.g. when this page is served by the
+        Emage server itself). Cross-origin fetches from another port/scheme are subject to browser CORS;
+        the layer-window API currently sends no CORS headers.
+    </p>
+</div>
+
+<div class="card">
+    <h3>1. Local pipeline (PNG → encrypted J2K)</h3>
+    <div class="row">
+        <input type="file" id="fileInput" accept="image/*">
+        <button id="processBtn" disabled>Encode &amp; decode (PNG → J2K)</button>
+        <button id="downloadBtn" disabled>Download encrypted .j2k</button>
+        <input type="file" id="j2kFileInput" accept=".j2k,.j2c">
+        <button id="decodeBtn" disabled>Decrypt uploaded file</button>
+    </div>
+    <div class="row">
+        <span>AES Key (hex, 32 bytes):</span>
+        <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
+    </div>
+    <div class="row">
+        <span>AES IV (hex, 16 bytes):</span>
+        <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="42">
+    </div>
+    <div class="row">
+        <span>J2K layers (quality/SNR progression, max 100):</span>
+        <input type="number" id="layerInput" value="8" min="1" max="100" style="width:70px">
+    </div>
+    <div style="display:flex; gap:20px; flex-wrap:wrap;">
+        <div>
+            <p style="margin:6px 0 0;">Original (PNG/JPG)</p>
+            <canvas id="srcCanvas"></canvas>
+        </div>
+        <div>
+            <p style="margin:6px 0 0;">Decoded J2K</p>
+            <canvas id="dstCanvas"></canvas>
+            <div id="stageLabel" style="font-size:12px; color:#8cf; margin-top:4px;"></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>2. Server images (gallery)</h3>
+    <div class="row">
+        <button id="galleryBtn">Refresh listing</button>
+        <button id="gOpenBtn" disabled>Open selected</button>
+        <button id="gDelBtn" disabled>Delete selected</button>
+        <span id="gCount" style="font-size:12px;color:#aaa;"></span>
+    </div>
+    <div id="gallery" class="gallery"></div>
+    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
+        Lists every file on the server and renders a decrypted preview of each J2K using the AES
+        key/IV above. Click a thumbnail to select it (fills the image path); double-click to load it
+        into the pipeline; hover for a per-image delete button.
+    </p>
+</div>
+
+<div class="card">
+    <h3>3. Server actions</h3>
+    <div class="row">
+        <button id="upBtn" disabled>Upload current J2K</button>
+        <button id="verifyBtn" disabled>Verify roundtrip</button>
+        <button id="delBtn" disabled>Delete on server</button>
+    </div>
+    <div id="status"></div>
+</div>
+
+<script type="module">
+    import { Emage, EmageError } from './emage.js';
+
+    let emage = null;
+
+    const $ = id => document.getElementById(id);
+    const srcCanvas = $('srcCanvas');
+    const dstCanvas = $('dstCanvas');
+
+    function status(msg) {
+        $('status').textContent = msg;
+    }
+
+    function fmtErr(err) {
+        return err instanceof EmageError ? err.message : Emage.messageOf(err);
+    }
+
+    // Push UI inputs into the library's mutable state.
+    function syncConfig() {
+        emage.setServer({
+            baseUrl: $('serverUrl').value,
+            imagePath: $('imgPath').value,
+            password: $('pwInput').value,
+        });
+        emage.setCrypto({ key: $('keyInput').value, iv: $('ivInput').value });
+    }
+
+    function setJ2kDependent(enabled) {
+        for (const id of ['downloadBtn', 'decodeBtn', 'upBtn', 'verifyBtn']) {
+            $(id).disabled = !enabled;
+        }
+    }
+
+    // Lazy-load both WASM modules through the library (cache-busted by the server).
+    Emage.init({ wasmBase: './cmake-build-wasm/' })
+        .then((m) => {
+            emage = m;
+            syncConfig();
+            $('processBtn').disabled = false;
+            $('delBtn').disabled = false;
+            drawDefaultPattern();
+            status('Ready. Load an image to encode.');
+            loadGallery();
+        })
+        .catch((err) => {
+            status('Failed to load WASM modules: ' + fmtErr(err));
+        });
+
+    // Generate a default test pattern so the page works without a source file.
+    function drawDefaultPattern() {
+        srcCanvas.width = 512;
+        srcCanvas.height = 512;
+        const ctx = srcCanvas.getContext('2d');
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, 512, 512);
+        ctx.fillStyle = '#888';
+        ctx.font = '26px sans-serif';
+        ctx.fillText('Load an image to encode', 120, 260);
+    }
+
+    function paint(result, label) {
+        emage.paintTo(dstCanvas, result);
+        $('stageLabel').textContent = label;
+    }
+
+    // Decode a codestream into dstCanvas using the library's key/IV.
+    function decodeToCanvas(stream, label) {
+        const t0 = performance.now();
+        try {
+            const result = emage.decode(stream);
+            paint(result, label);
+            status(`${label}: ${result.width}x${result.height} in ` +
+                `${(performance.now() - t0).toFixed(1)} ms`);
+            return result;
+        } catch (err) {
+            status(`${label}: DECODE FAILED — ${fmtErr(err)}`);
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Server actions
+    // ---------------------------------------------------------------------
+
+    async function onUpload() {
+        syncConfig();
+        if (!emage.j2k) {
+            status('Nothing to upload — encode an image first.');
+            return;
+        }
+        try {
+            const data = await emage.upload(emage.j2k);
+            status(`uploaded ${data.stored}: ${data.width}x${data.height}, ` +
+                `layers=${data.layers}, bytes=${data.bytes}`);
+            loadGallery();
+        } catch (err) {
+            status('upload error: ' + fmtErr(err));
+        }
+    }
+
+    async function onDelete() {
+        try {
+            syncConfig();
+            const data = await emage.remove();
+            status(`deleted ${data.deleted}`);
+        } catch (err) {
+            status('delete error: ' + fmtErr(err));
+        }
+    }
+
+    // Upload, load back from the server, and count differing pixels vs the
+    // local decode. 0 diffs means the server roundtrip is pixel-identical.
+    async function onVerify() {
+        if (!emage.j2k) {
+            status('Verify needs a locally encoded J2K — encode an image first.');
+            return;
+        }
+        try {
+            syncConfig();
+            status('verifying: uploading and re-downloading...');
+            await emage.upload(emage.j2k);
+            const local = emage.decode(emage.j2k);
+            const out = await emage.playAll();
+            const server = out.decoded;
+            if (local.width !== server.width || local.height !== server.height) {
+                status(`verify: DIMENSION MISMATCH (${local.width}x${local.height} vs ` +
+                    `${server.width}x${server.height})`);
+                return;
+            }
+            let diff = 0;
+            const short = Math.min(local.rgbaPixels.length, server.rgbaPixels.length);
+            for (let i = 0; i < short; ++i) {
+                if (local.rgbaPixels[i] !== server.rgbaPixels[i]) ++diff;
+            }
+            diff += Math.abs(local.rgbaPixels.length - server.rgbaPixels.length);
+            status(diff === 0
+                ? `verify: PASS — server roundtrip is pixel-identical`
+                : `verify: FAIL — ${diff} differing pixels`);
+            emage.paintTo(dstCanvas, server);
+            $('stageLabel').textContent = `Server roundtrip (${out.stream.length} bytes)`;
+        } catch (err) {
+            status('verify error: ' + fmtErr(err));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Local pipeline (PNG → encode → decode)
+    // ---------------------------------------------------------------------
+
+    $('fileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const img = new Image();
+        img.onload = () => {
+            srcCanvas.width = img.width;
+            srcCanvas.height = img.height;
+            const ctx = srcCanvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            status(`Loaded image: ${img.width}x${img.height}`);
+        };
+        img.src = URL.createObjectURL(file);
+    });
+
+    $('processBtn').addEventListener('click', runPipeline);
+
+    $('downloadBtn').addEventListener('click', () => {
+        if (!emage.j2k) return;
+        const blob = new Blob([emage.j2k], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'encrypted.j2k';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        status(`Downloaded encrypted J2K (${emage.j2k.length} bytes).`);
+    });
+
+    $('j2kFileInput').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const bytes = await Emage.readBytes(file);
+            emage.j2k = bytes;
+            setJ2kDependent(true);
+            status(`Loaded encrypted J2K file: ${bytes.length} bytes.`);
+        } catch (err) {
+            status('load error: ' + fmtErr(err));
+        }
+    });
+
+    $('decodeBtn').addEventListener('click', () => {
+        if (emage.j2k) decodeToCanvas(emage.j2k, 'Decoded uploaded J2K');
+    });
+
+    $('upBtn').addEventListener('click', onUpload);
+    $('verifyBtn').addEventListener('click', onVerify);
+    $('delBtn').addEventListener('click', onDelete);
+
+    // ---------------------------------------------------------------------
+    // Server image gallery
+    // ---------------------------------------------------------------------
+
+    const gallery = $('gallery');
+    let galleryTick = 0;
+
+    function humanBytes(n) {
+        if (n == null || !Number.isFinite(n)) return '?';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0, v = n;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; ++i; }
+        return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    function setSelButtons(enabled) {
+        $('gOpenBtn').disabled = !enabled;
+        $('gDelBtn').disabled = !enabled;
+    }
+
+    function selectImage(path) {
+        $('imgPath').value = path;
+        if (emage) emage.server.imagePath = path;
+        for (const el of gallery.querySelectorAll('.g-item')) {
+            el.classList.toggle('selected', el.dataset.path === path);
+        }
+        setSelButtons(true);
+        status(`Selected ${path} — open it, verify the roundtrip, or delete it.`);
+    }
+
+    async function openImage(path) {
+        try {
+            syncConfig();
+            emage.server.imagePath = path;
+            $('imgPath').value = path;
+            status(`Loading ${path}…`);
+            const out = await emage.playAll({ canvas: dstCanvas });
+            $('stageLabel').textContent = `Server: ${path}`;
+            status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers ` +
+                `(${out.stream.length} bytes)`);
+        } catch (err) {
+            status('open error: ' + fmtErr(err));
+        }
+    }
+
+    function makeGalleryCard(img) {
+        const card = document.createElement('div');
+        card.className = 'g-item';
+        card.dataset.path = img.path;
+
+        const box = document.createElement('div');
+        box.className = 'thumbbox';
+        box.innerHTML = '<div class="g-placeholder">\u2026</div>';
+        card.appendChild(box);
+
+        const name = document.createElement('div');
+        name.className = 'g-name';
+        name.textContent = img.path;
+        name.title = img.path;
+        card.appendChild(name);
+
+        const meta = document.createElement('div');
+        meta.className = 'g-meta';
+        const parts = [humanBytes(img.bytes)];
+        if (img.layers != null) parts.push(`${img.width}\u00d7${img.height}`, `${img.layers} layers`);
+        else parts.push('not a J2K codestream');
+        meta.textContent = parts.join(' \u00b7 ');
+        card.appendChild(meta);
+
+        const del = document.createElement('button');
+        del.className = 'g-del';
+        del.title = 'Delete on server';
+        del.textContent = '\u2715';
+        del.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm(`Delete "${img.path}" on the server?`)) return;
+            try {
+                syncConfig();
+                emage.server.imagePath = img.path;
+                const data = await emage.remove();
+                status(`deleted ${data.deleted}`);
+                loadGallery();
+            } catch (err) {
+                status('delete error: ' + fmtErr(err));
+            }
+        });
+        card.appendChild(del);
+
+        card.addEventListener('click', () => selectImage(img.path));
+        card.addEventListener('dblclick', () => openImage(img.path));
+        return card;
+    }
+
+    async function renderThumb(img, card) {
+        const box = card.querySelector('.thumbbox');
+        try {
+            emage.server.imagePath = img.path;
+            const out = await emage.preview();
+            const d = out.decoded;
+            if (!d) throw new EmageError('no decoded output');
+            const scale = Math.min(160 / d.width, 104 / d.height);
+            const w = Math.max(1, Math.round(d.width * scale));
+            const h = Math.max(1, Math.round(d.height * scale));
+            const tmp = document.createElement('canvas');
+            tmp.width = d.width;
+            tmp.height = d.height;
+            tmp.getContext('2d').putImageData(new ImageData(d.rgbaPixels, d.width, d.height), 0, 0);
+            const canvas = document.createElement('canvas');
+            canvas.className = 'thumb';
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(tmp, 0, 0, w, h);
+            box.innerHTML = '';
+            box.appendChild(canvas);
+            box.title = `${d.width}\u00d7${d.height}`;
+        } catch (err) {
+            box.innerHTML = '<div class="g-placeholder">no preview</div>';
+            box.title = fmtErr(err);
+        }
+    }
+
+    async function loadGallery() {
+        if (!emage) return;
+        syncConfig();
+        const tick = ++galleryTick;
+        status('Listing server images\u2026');
+        gallery.innerHTML = '<div class="g-empty">listing\u2026</div>';
+        let list;
+        try {
+            list = await emage.list();
+        } catch (err) {
+            status('listing error: ' + fmtErr(err));
+            gallery.innerHTML = '';
+            $('gCount').textContent = '';
+            return;
+        }
+        if (tick !== galleryTick) return;
+        gallery.innerHTML = '';
+        if (!list.length) {
+            $('gCount').textContent = '0 images';
+            gallery.innerHTML = '<div class="g-empty">No images on the server yet \u2014 encode &amp; upload one above.</div>';
+            status('Server image root is empty.');
+            return;
+        }
+        $('gCount').textContent = list.length + (list.length === 1 ? ' image' : ' images');
+        const cards = [];
+        for (const img of list) {
+            if (tick !== galleryTick) return;
+            const card = makeGalleryCard(img);
+            cards.push({ img, card });
+            gallery.appendChild(card);
+        }
+        if (tick !== galleryTick) return;
+        status(`Fetching thumbnails (${cards.length})\u2026`);
+        for (const { img, card } of cards) {
+            if (tick !== galleryTick) return;
+            await renderThumb(img, card);
+        }
+        if (tick !== galleryTick) return;
+        setSelButtons($('imgPath').value.trim() ? true : false);
+        status(`${list.length} image(s). Click to select \u2014 double-click to open.`);
+    }
+
+    $('galleryBtn').addEventListener('click', loadGallery);
+    $('gOpenBtn').addEventListener('click', () => {
+        const path = $('imgPath').value.trim();
+        if (path) openImage(path);
+    });
+    $('gDelBtn').addEventListener('click', async () => {
+        const path = $('imgPath').value.trim();
+        if (!path) return;
+        if (!confirm(`Delete "${path}" on the server?`)) return;
+        try {
+            syncConfig();
+            const data = await emage.remove();
+            status(`deleted ${data.deleted}`);
+            setSelButtons(false);
+            loadGallery();
+        } catch (err) {
+            status('delete error: ' + fmtErr(err));
+        }
+    });
+
+    async function runPipeline() {
+        if (!emage) return;
+
+        const width = srcCanvas.width;
+        const height = srcCanvas.height;
+
+        status(`Encoding ${width}x${height}...`);
+        const t0 = performance.now();
+        try {
+            syncConfig();
+            emage.encodeCanvas(srcCanvas, {
+                numLayers: parseInt($('layerInput').value, 10),
+            });
+        } catch (err) {
+            status('Encoding error: ' + fmtErr(err));
+            return;
+        }
+
+        // A fresh encoded stream is encodable/decodable → enable server actions.
+        setJ2kDependent(true);
+        status(`Encoded to J2K in ${(performance.now() - t0).toFixed(1)} ms ` +
+            `(${emage.j2k.length} bytes)`);
+        decodeToCanvas(emage.j2k, 'Decoded local J2K');
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Emage — Progressive Downloader</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background: #1a1a1a;
+            color: #eee;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .card {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .card h3 {
+            margin-top: 0;
+        }
+
+        canvas {
+            background: #000;
+            border: 1px solid #444;
+            display: block;
+            margin-top: 10px;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        input, button {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: .5;
+        }
+
+        #status {
+            color: #8cf;
+            font-family: monospace;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+
+        .fs-view {
+            font-family: monospace;
+            font-size: 13px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            max-height: 260px;
+            overflow: auto;
+            margin-top: 8px;
+        }
+
+        .fs-row {
+            display: flex;
+            gap: 10px;
+            align-items: baseline;
+            padding: 4px 10px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .fs-row:hover {
+            background: #333;
+        }
+
+        .fs-row.selected {
+            background: #1d4b5f;
+        }
+
+        .fs-row .fs-name {
+            flex: 0 0 auto;
+        }
+
+        .fs-row.dir .fs-name {
+            color: #8fc;
+            font-weight: 600;
+        }
+
+        .fs-row.fs-empty {
+            color: #888;
+        }
+
+        .fs-row .fs-info {
+            color: #777;
+            margin-left: auto;
+        }
+
+        .fs-crumbs {
+            font-family: monospace;
+            font-size: 13px;
+            color: #8cf;
+        }
+
+        .fs-crumbs .crumb {
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .fs-crumbs .crumb:hover {
+            background: #333;
+        }
+
+        .fs-crumbs .sep {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Emage — progressive downloader side</h2>
+<p style="font-size: 13px; color: #aaa; margin: 0 0 12px;">
+    <a href="uploader.html">Uploader</a> ·
+    <a href="downloader.html">Progressive downloader</a> ·
+    <a href="compare.html">Comparison</a>
+</p>
+
+<div class="card">
+    <h3>0. Server connection</h3>
+    <div class="row">
+        <label>Server base URL
+            <input type="text" id="serverUrl" value="http://localhost:3233" size="30">
+        </label>
+        <label>Image path
+            <input type="text" id="imgPath" value="encrypted.j2k" size="22">
+        </label>
+    </div>
+    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
+        Read-side requests need no upload password. Leave the base URL empty to call the API
+        same-origin (e.g. when this page is served by the Emage server itself). Cross-origin fetches
+        from another port/scheme are subject to browser CORS; the layer-window API currently sends no
+        CORS headers.
+    </p>
+</div>
+
+<div class="card">
+    <h3>1. Decryption key</h3>
+    <div class="row">
+        <span>AES Key (hex, 32 bytes):</span>
+        <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
+    </div>
+    <div class="row">
+        <span>AES IV (hex, 16 bytes):</span>
+        <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="42">
+    </div>
+</div>
+
+<div class="card">
+    <h3>2. Image browser (virtual filesystem)</h3>
+    <div class="row">
+        <button id="browseBtn" disabled>Refresh listing</button>
+        <span id="fsCrumbs" class="fs-crumbs"></span>
+    </div>
+    <div id="fsView" class="fs-view"><div class="fs-row fs-empty">- awaiting listing: press &quot;Refresh listing&quot; -</div></div>
+    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
+        Image paths are shown like files under a virtual root. Folders are derived from the path
+        components, so <code>sub/dir/photo.j2k</code> appears in <code>sub/dir/</code>. Click a folder
+        to descend; click a file to prepare it for loading, or double-click to start a progressive load.
+    </p>
+</div>
+
+<div class="card">
+    <h3>3. Progressive load</h3>
+    <div class="row">
+        <button id="metaBtn" disabled>Fetch meta</button>
+        <button id="fullBtn" disabled>Load full</button>
+        <label>Display size
+            <input type="text" id="sizeInput" value="10vw" size="8" placeholder="e.g. 200, 10vw">
+        </label>
+        <button id="sizeBtn" disabled>Load for size</button>
+    </div>
+    <div>
+        <p style="margin:6px 0 0;">Decoded (progressive)</p>
+        <canvas id="dstCanvas"></canvas>
+        <div id="stageLabel" style="font-size:12px; color:#8cf; margin-top:4px;"></div>
+    </div>
+    <div id="status"></div>
+</div>
+
+<script type="module">
+    import { Emage, EmageError } from './emage.js';
+
+    let emage = null;
+
+    const $ = id => document.getElementById(id);
+    const dstCanvas = $('dstCanvas');
+
+    function status(msg) {
+        $('status').textContent = msg;
+    }
+
+    function fmtErr(err) {
+        return err instanceof EmageError ? err.message : Emage.messageOf(err);
+    }
+
+    // Push UI inputs into the library's mutable state. No password — reads only.
+    function syncConfig() {
+        emage.setServer({
+            baseUrl: $('serverUrl').value,
+            imagePath: $('imgPath').value,
+        });
+        emage.setCrypto({ key: $('keyInput').value, iv: $('ivInput').value });
+    }
+
+    // Lazy-load both WASM modules through the library (cache-busted by the server).
+    Emage.init({ wasmBase: './cmake-build-wasm/' })
+        .then((m) => {
+            emage = m;
+            syncConfig();
+            for (const id of ['metaBtn', 'fullBtn', 'sizeBtn', 'browseBtn']) {
+                $(id).disabled = false;
+            }
+            status('Ready. Fetch meta or load an image.');
+        })
+        .catch((err) => {
+            status('Failed to load WASM modules: ' + fmtErr(err));
+        });
+
+    // Live progress: called once per layer as it is fetched and rendered.
+    function onLayer(st) {
+        $('stageLabel').textContent = st.complete
+            ? `Full image (${st.totalLayers} layers)`
+            : `Layer ${st.layer}/${st.totalLayers} preview`;
+        status(`Loaded ${st.layer}/${st.totalLayers} layers`);
+    }
+
+    async function onMeta() {
+        try {
+            syncConfig();
+            const meta = await emage.meta();
+            status(`meta: ${meta.width}x${meta.height}, layers=${meta.layers}, bytes=${meta.bytes}`);
+        } catch (err) {
+            status('meta error: ' + fmtErr(err));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Image browser: pictures the server's /images listing as a virtual
+    // filesystem rooted at "/", with directories derived from each image's
+    // path components.
+    // ---------------------------------------------------------------------
+
+    // fsCwd: array of directory-name segments below the virtual root.
+    // fsTable: { comps, ... } where comps are the path components of every
+    // known image (last component is the file name).
+    let fsTable = [];
+    let fsCwd = [];
+
+    function humanBytes(n) {
+        if (n == null || !Number.isFinite(n)) return '?';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let i = 0;
+        let v = n;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; ++i; }
+        return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    function fsSelectedPath() {
+        // selectFile() stores the full path in the image-path field, so the
+        // selection the fs view is acting on is always imgPath.value itself.
+        return $('imgPath').value;
+    }
+
+    // Prepare a file: mirror its path into the image-path field so the other
+    // controls (meta / load full / load for size) operate on it.
+    function selectFile(path) {
+        $('imgPath').value = path;
+        if (emage) emage.server.imagePath = path;
+        for (const el of document.querySelectorAll('.fs-row')) {
+            el.classList.toggle('selected', el.dataset.path === path);
+        }
+        status(`Selected ${path} — use Load full / Load for size (or double-click).`);
+    }
+
+    function loadSelected() {
+        const path = fsSelectedPath();
+        $('imgPath').value = path;
+        if (emage) emage.server.imagePath = path;
+        syncConfig();
+        onFull();
+    }
+
+    // Render the current directory: folders first, then files.
+    function renderFs() {
+        const dirs = new Set();
+        const files = [];
+        for (const img of fsTable) {
+            const comps = img.comps;
+            if (fsCwd.length === 0) {
+                if (comps.length > 1) dirs.add(comps[0]);
+                else files.push(img);
+            } else {
+                if (comps.length <= fsCwd.length) continue;
+                const same = fsCwd.every((d, i) => comps[i] === d);
+                if (!same) continue;
+                if (comps.length === fsCwd.length + 1) files.push(img);
+                else dirs.add(comps[fsCwd.length]);
+            }
+        }
+
+        const crumbs = $('fsCrumbs');
+        crumbs.innerHTML = '';
+        const crumb = (label, dirsDepth) => {
+            const span = document.createElement('span');
+            span.className = 'crumb';
+            span.textContent = label;
+            span.title = label === 'root' ? 'virtual filesystem root' : 'navigate up to this folder';
+            span.addEventListener('click', () => { fsCwd = fsCwd.slice(0, dirsDepth); renderFs(); });
+            crumbs.appendChild(span);
+        };
+        crumb('root', 0);
+        fsCwd.forEach((d, i) => {
+            const sep = document.createElement('span');
+            sep.className = 'sep';
+            sep.textContent = ' / ';
+            crumbs.appendChild(sep);
+            crumb(d, i + 1);
+        });
+
+        const view = $('fsView');
+        view.innerHTML = '';
+        const addEntry = (name, cls, cb) => {
+            const row = document.createElement('div');
+            row.className = 'fs-row' + (cls ? ' ' + cls : '');
+            const nm = document.createElement('span');
+            nm.className = 'fs-name';
+            if (cls === 'dir') nm.textContent = name + '/';
+            else nm.textContent = name;
+            row.appendChild(nm);
+            if (cb) row.addEventListener('click', cb);
+            view.appendChild(row);
+            return row;
+        };
+        // Parent-directory entry (while not at the root).
+        if (fsCwd.length) {
+            addEntry('..', 'dir', () => { fsCwd.pop(); renderFs(); });
+        }
+        // Folders (non-empty ones are created on demand by refreshFs).
+        for (const d of [...dirs].sort()) {
+            addEntry(d, 'dir', () => { fsCwd.push(d); renderFs(); });
+        }
+        // Files.
+        const info = (img) => {
+            const parts = [humanBytes(img.bytes)];
+            if (img.layers != null) parts.push(`${img.width}\u00d7${img.height}`, `${img.layers} layers`);
+            else parts.push('not a J2K codestream');
+            return parts.join(' \u00b7 ');
+        };
+        files.sort((a, b) => a.comps[a.comps.length - 1].localeCompare(b.comps[b.comps.length - 1]));
+        for (const img of files) {
+            const name = img.comps[img.comps.length - 1];
+            const row = addEntry(name, 'file', () => selectFile(row.dataset.path));
+            const meta = document.createElement('span');
+            meta.className = 'fs-info';
+            meta.textContent = info(img);
+            row.appendChild(meta);
+            row.dataset.path = fsCwd.length ? fsCwd.join('/') + '/' + name : name;
+            row.addEventListener('dblclick', () => { selectFile(row.dataset.path); loadSelected(); });
+        }
+        if (view.children.length === 0) {
+            view.innerHTML = '<div class="fs-row fs-empty">(empty directory)</div>';
+        } else {
+            const first = view.firstChild;
+            if (first) requestAnimationFrame(() => first.scrollIntoView({ block: 'center' }));
+        }
+    }
+
+    async function refreshFs() {
+        try {
+            syncConfig();
+            fsCwd = [];
+            const list = await emage.list();
+            fsTable = list.map((img) => ({ ...img, comps: img.path.split('/').filter(Boolean) }));
+            renderFs();
+            const n = fsTable.length;
+            status(n ? `Listing: ${n} image(s) under the virtual root.` : 'Listing: image root is empty.');
+        } catch (err) {
+            status('listing error: ' + fmtErr(err));
+        }
+    }
+
+    $('browseBtn').addEventListener('click', refreshFs);
+
+    // Progressively load every quality layer into dstCanvas.
+    async function onFull() {
+        try {
+            syncConfig();
+            const out = await emage.playAll({ canvas: dstCanvas, onLayer });
+            status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers ` +
+                `(${out.stream.length} bytes)`);
+        } catch (err) {
+            status('load-full error: ' + fmtErr(err));
+        }
+    }
+
+    // Progressively load only the layers needed to render at the requested
+    // display size (px number, or px/vw/vh/% string) into dstCanvas.
+    async function onSize() {
+        try {
+            syncConfig();
+            const out = await emage.display($('sizeInput').value, { canvas: dstCanvas, onLayer });
+            status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers — ` +
+                `rendered ${out.displaySize.width}x${out.displaySize.height} ` +
+                `(${out.stream.length} bytes)`);
+        } catch (err) {
+            status('size load error: ' + fmtErr(err));
+        }
+    }
+
+    $('metaBtn').addEventListener('click', onMeta);
+    $('fullBtn').addEventListener('click', onFull);
+    $('sizeBtn').addEventListener('click', onSize);
+</script>
+</body>
+</html>
