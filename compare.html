@@ -70,8 +70,8 @@
         }
 
         .side {
-            flex: 1 1 320px;
-            min-width: 280px;
+            flex: 1 1 260px;
+            min-width: 240px;
         }
 
         .side h4 {
@@ -167,60 +167,69 @@
     </p>
 </div>
 
-<div class="card">
-    <h3>1. Render — progressive (left) vs full &quot;all&quot; (right)</h3>
-    <div class="side-by-side">
-        <div class="side">
-            <h4>Progressive: N window requests</h4>
-            <canvas id="cvsProg"></canvas>
-            <div id="progTv" class="tv"></div>
-        </div>
-        <div class="side">
-            <h4>Full: single request (X-Emage-Layers: all)</h4>
-            <canvas id="cvsFull"></canvas>
-            <div id="fullTv" class="tv"></div>
+    <div class="card">
+        <h3>1. Render</h3>
+        <div class="side-by-side">
+            <div class="side">
+                <h4>A. Progressive resolutions: decode each DWT level, coarsest first</h4>
+                <canvas id="cvsProg"></canvas>
+                <div id="progTv" class="tv"></div>
+            </div>
+            <div class="side">
+                <h4>B. One-shot at the target resolution</h4>
+                <canvas id="cvsOnce"></canvas>
+                <div id="onceTv" class="tv"></div>
+            </div>
+            <div class="side">
+                <h4>C. One-shot at full resolution (baseline)</h4>
+                <canvas id="cvsFull"></canvas>
+                <div id="fullTv" class="tv"></div>
+            </div>
         </div>
     </div>
-</div>
 
-<div class="card">
-    <h3>2. Results</h3>
-    <table id="tbl">
-        <thead>
-        <tr>
-            <th>metric</th>
-            <th>progressive</th>
-            <th>full (all)</th>
-            <th>verdict</th>
-        </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
-    <p class="sub" style="margin: 8px 0 0;">
-        Progressive fetches the main header once, then one window per quality layer, appending packets and
-        decoding a frame at each step. Full fetches headers + all packets in a single response. Both loads
-        run in parallel from the same start time, so the fetch timings are collected under identical network
-        conditions; the full payload's decode runs after the progressive pipeline finishes painting, so a
-        long synchronous decode can't skip the intermediate progressive frames. When a display size limits
-        the progressive side, its frame is compared at that size (full raster downscaled) rather than at
-        full resolution.
-    </p>
-</div>
+    <div class="card">
+        <h3>2. Results</h3>
+        <table id="tbl">
+            <thead>
+            <tr>
+                <th>metric</th>
+                <th>A progressive</th>
+                <th>B one-shot @ target</th>
+                <th>C one-shot full</th>
+                <th>verdict</th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <p class="sub" style="margin: 8px 0 0;">
+            All three columns fetch the same codestream in the same single request: resolution levels are
+            spatially nested, not bandwidth-separable, so a reduced-resolution decode still needs every byte.
+            They differ only in which DWT levels the decoder is asked for. Decoding level <i>r</i> means
+            ceil(W&nbsp;/&nbsp;2<sup>NL-r</sup>) square, so the decoder never MQ-decodes the code blocks above
+            <i>r</i> and never runs the high-pass synthesis path on them. A walks from two levels coarser than
+            the target down to it, so its intermediate frames are a quarter the samples of the next one and
+            cost a small multiple of the final decode in total. B decodes only the target level. C is the old
+            behaviour: full resolution regardless of the size target, kept as the baseline. The three runs are
+            sequential, each timed from its own start.
+        </p>
+    </div>
 
-<div class="card">
-    <h3>3. Progressive steps (per layer)</h3>
-    <table id="stepsTbl">
-        <thead>
-        <tr>
-            <th>layer</th>
-            <th>bytes fetched</th>
-            <th>cumulative bytes</th>
-            <th>cumulative ms</th>
-        </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
-</div>
+    <div class="card">
+        <h3>3. Column A progressive steps (per resolution level)</h3>
+        <table id="stepsTbl">
+            <thead>
+            <tr>
+                <th>step</th>
+                <th>reduction</th>
+                <th>decoded size</th>
+                <th>sample pixels</th>
+                <th>cumulative ms</th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
 
 <div id="status"></div>
 
@@ -231,6 +240,7 @@
 
     const $ = id => document.getElementById(id);
     const cvsProg = $('cvsProg');
+    const cvsOnce = $('cvsOnce');
     const cvsFull = $('cvsFull');
 
     function status(msg) {
@@ -268,40 +278,12 @@
         return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
     }
 
-    // Count differing pixels between two canvases. When the sizes differ the
-    // larger raster is downscaled (high-quality) onto the smaller's dimensions
-    // first, so a size-limited progressive frame can be diffed against the
-    // full image rendered at the same size.
-    function canvasDiff(a, b) {
-        let da, db;
-        if (a.width === b.width && a.height === b.height) {
-            const aData = a.getContext('2d').getImageData(0, 0, a.width, a.height).data;
-            const bData = b.getContext('2d').getImageData(0, 0, a.width, a.height).data;
-            da = aData; db = bData;
-            let diff = 0;
-            for (let i = 0; i < da.length; ++i) if (da[i] !== db[i]) ++diff;
-            return { dimsMatch: true, diff };
-        }
-        const tmp = document.createElement('canvas');
-        tmp.width = a.width;
-        tmp.height = a.height;
-        const tctx = tmp.getContext('2d');
-        tctx.imageSmoothingEnabled = true;
-        tctx.imageSmoothingQuality = 'high';
-        tctx.drawImage(b, 0, 0, a.width, a.height);
-        da = a.getContext('2d').getImageData(0, 0, a.width, a.height).data;
-        db = tctx.getImageData(0, 0, a.width, a.height).data;
-        let diff = 0;
-        for (let i = 0; i < da.length; ++i) if (da[i] !== db[i]) ++diff;
-        return { dimsMatch: false, diff };
-    }
-
     function setVerdict(cell, ok, text) {
         cell.className = 'verdict ' + (ok ? 'ok' : 'bad');
         cell.textContent = text;
     }
 
-    function appendRow(metric, a, b, ok, verdict) {
+    function appendRow(metric, a, b, c, ok, verdict) {
         const tbody = $('tbl').querySelector('tbody');
         const tr = document.createElement('tr');
         const mk = (v, num) => {
@@ -313,6 +295,7 @@
         mk(metric, false);
         mk(a, true);
         mk(b, true);
+        mk(c, true);
         const td = document.createElement('td');
         setVerdict(td, ok, verdict);
         tr.appendChild(td);
@@ -327,110 +310,91 @@
         const tbodyS = $('stepsTbl').querySelector('tbody');
         tbodyA.innerHTML = '';
         tbodyS.innerHTML = '';
-        cvsProg.width = cvsProg.height = cvsFull.width = cvsFull.height = 0;
+        for (const c of [cvsProg, cvsOnce, cvsFull]) c.width = c.height = 0;
         $('progTv').textContent = '';
+        $('onceTv').textContent = '';
         $('fullTv').textContent = '';
         $('imgMeta').textContent = '';
-        status('Comparing (progressive and full run in parallel)...');
 
         const stepMs = [];
-        const t0 = performance.now();
-        const base = String(emage.server.baseUrl || '').replace(/\/+$/, '');
-
         const sizeTarget = $('sizeInput').value.trim();
         const sizeLimited = !(sizeTarget === '' || sizeTarget === 'all' || sizeTarget === '100%');
 
-        let tProg = 0;
-        const progOpts = {
-            canvas: cvsProg,
-            onLayer: (st) => {
-                stepMs.push(performance.now() - t0);
-                $('progTv').textContent = st.complete
-                    ? `Full image (${st.totalLayers} layers)`
-                    : `Layer ${st.layer}/${st.totalLayers} preview`;
-                status(`Progressive: loaded ${st.layer}/${st.totalLayers} layers ` +
-                    `(${fmtBytes(st.assembledBytes)} transferred)`);
-            },
+        // Every column is one fetch of the same codestream; they differ only in
+        // the DWT resolution level the decoder is asked to stop at. Each pass is
+        // timed from its own start and runs strictly after the previous one, so
+        // no column shares bandwidth or main-thread time with another.
+        const runPass = async (canvas, tv, label, target, opts) => {
+            const t0 = performance.now();
+            const pass = {
+                ...opts,
+                canvas,
+                onLayer: (st) => {
+                    stepMs.push(performance.now() - t0);
+                    tv.textContent = st.complete
+                        ? `Final ${st.width}×${st.height}`
+                        : `Level ${st.layer}/${st.totalLayers}: ${st.width}×${st.height}`;
+                    status(`${label}: decoded ${st.width}×${st.height} ` +
+                        `(reduction ${st.reduction}) at ${(performance.now() - t0).toFixed(0)} ms`);
+                },
+            };
+            const res = await emage.display(target, pass);
+            return { res, ms: performance.now() - t0 };
         };
-        const progP = (sizeLimited
-                ? emage.display(sizeTarget, progOpts)
-                : emage.playAll(progOpts))
-            .then((p) => {
-                tProg = performance.now() - t0;
-                return p;
-            })
-            .catch((err) => {
-                status('progressive load failed: ' + fmtErr(err));
-                return null;
-            });
 
-        // Fetch both in parallel from the same t0. The full payload is only
-        // captured here; its decode is deferred until after the progressive
-        // pipeline finishes, so the long synchronous WASM decode cannot starve
-        // the browser of presenting each intermediate progressive frame.
-        const fullP = (async () => {
-            const resp = await fetch(base + '/image/' + emage.server.imagePath, {
-                headers: { 'X-Emage-Layers': 'all' },
-            });
-            const body = new Uint8Array(await resp.arrayBuffer());
-            if (!resp.ok) {
-                $('fullTv').textContent = 'FAILED: HTTP ' + resp.status;
-                return { error: 'full load failed: HTTP ' + resp.status };
-            }
-            $('fullTv').textContent = `payload received (${fmtBytes(body.length)}), decoding\u2026`;
-            return { body };
-        })();
-
-        const [prog, fullFetch] = await Promise.all([progP, fullP]);
-        if (!prog) return;
-        if (fullFetch.error) {
-            status(fullFetch.error);
-            return;
-        }
-        const { body: fullBody } = fullFetch;
-        let fullDec;
+        let a, b, c;
         try {
-            fullDec = emage.decode(fullBody);
+            status('A. Progressive resolutions (decode each DWT level)...');
+            a = await runPass(cvsProg, $('progTv'), 'A', sizeTarget, {});
+            status(`A done in ${a.ms.toFixed(1)} ms. B. One-shot at the target resolution...`);
+            b = await runPass(cvsOnce, $('onceTv'), 'B', sizeTarget, { progressive: false });
+            status(`B done in ${b.ms.toFixed(1)} ms. C. One-shot at full resolution...`);
+            c = await runPass(cvsFull, $('fullTv'), 'C', 'all', { progressive: false });
         } catch (err) {
-            status('full load decode failed (wrong key/IV?): ' + fmtErr(err));
+            status('load failed: ' + fmtErr(err));
             return;
         }
-        emage.paintTo(cvsFull, fullDec);
-        const tFull = performance.now() - t0;
 
-        const meta = prog.meta;
+        const meta = b.res.meta;
         $('imgMeta').textContent =
-            `${meta.width}x${meta.height}, ${meta.layers} layers, ${meta.bytes} bytes`;
+            `${meta.width}x${meta.height}, ${meta.layers} layers, ` +
+            `${b.res.numResolutions} resolutions, ` +
+            `${meta.bytes} bytes`;
 
         // ---- metrics -------------------------------------------------------
-        const progBytes = prog.steps.reduce((a, s) => a + s.appendedBytes, 0);
-        const progRequests = prog.steps.length + 1; // meta + one window per layer
-        const progMs = tProg;
-        const fullBytes = fullBody.length;
-        const fullRequests = 1;
-        const fullMs = tFull;
+        const pixels = r => r.res.steps.reduce((s, x) => s + x.pixels, 0);
+        const bytes = r => r.res.stream.length;
+        const dims = r => `${r.res.decoded.width}×${r.res.decoded.height}`;
+        const ms = v => v.toFixed(1) + ' ms';
+        const aFirst = stepMs.length ? stepMs[0] : null;
 
-        const cmp = canvasDiff(cvsProg, cvsFull);
-        const dimsOk = cmp.dimsMatch;
-        const diff = cmp.diff;
-        const pixelsOk = dimsOk && diff === 0;
+        appendRow('final image', dims(a), dims(b), dims(c), true,
+            sizeLimited ? 'A and B stop at the target, C ignores it' : 'all at full resolution');
+        appendRow('resolution level', a.res.reduction, b.res.reduction, c.res.reduction, true,
+            'DWT halvings from full resolution');
+        appendRow('decoder runs', a.res.decodes, b.res.decodes, c.res.decodes,
+            true, 'one MQ + DWT pass per level decoded');
+        appendRow('sample pixels decoded', fmtBytes(pixels(a)), fmtBytes(pixels(b)), fmtBytes(pixels(c)),
+            true, 'cumulative across the column\'s steps');
+        appendRow('bytes transferred', fmtBytes(bytes(a)), fmtBytes(bytes(b)), fmtBytes(bytes(c)),
+            true, 'identical: levels are nested, not separable');
+        appendRow('HTTP requests', 1, 1, 1, true, 'one full codestream each');
+        appendRow('time to first frame', aFirst == null ? '—' : ms(aFirst), '—', '—', true,
+            'only A shows intermediate frames');
+        appendRow('total time', ms(a.ms), ms(b.ms), ms(c.ms), true,
+            'sequential passes, each from its own t0');
+        appendRow('resolution levels available', a.res.numResolutions, b.res.numResolutions,
+            c.res.numResolutions, true, 'DWT decomposition levels, reported by the server');
 
-        appendRow('bytes transferred', fmtBytes(progBytes), fmtBytes(fullBytes),
-            true, 'headers + packets vs re-framed stream');
-        appendRow('HTTP requests', progRequests, fullRequests, progRequests > 0, 'strategy');
-        appendRow('total time', progMs.toFixed(1) + ' ms', fullMs.toFixed(1) + ' ms',
-            true, 'one-shot vs layered');
-        const dimsText = (c, limited) => `${c.width}\u00d7${c.height}` + (limited ? ' (size-limited)' : '');
-        appendRow('final image', dimsText(cvsProg, sizeLimited), dimsText(cvsFull, false),
-            dimsOk, sizeLimited && dimsOk ? 'progressive is smaller' : dimsOk ? 'match' : 'MISMATCH');
-        appendRow('pixel diff', diff, '0', pixelsOk, pixelsOk ? 'IDENTICAL' : 'NON-ZERO DIFF');
 
-        // ---- per-step detail ----------------------------------------------
-        for (let i = 0; i < prog.steps.length; ++i) {
-            const s = prog.steps[i];
+        // ---- per-step detail (column A) -------------------------------------
+        const aSteps = a.res.steps;
+        for (let i = 0; i < aSteps.length; ++i) {
+            const s = aSteps[i];
             const tr = document.createElement('tr');
-            for (const text of [String(s.layer), fmtBytes(s.appendedBytes),
-                fmtBytes(s.assembledBytes), (stepMs[i] ?? 0).toFixed(1) + ' ms']) {
+            for (const text of [String(s.layer), String(s.reduction),
+                `${s.width}×${s.height}`, fmtBytes(s.pixels),
+                (stepMs[i] ?? 0).toFixed(1) + ' ms']) {
                 const td = document.createElement('td');
                 td.className = 'num';
                 td.textContent = text;
@@ -439,21 +403,18 @@
             tbodyS.appendChild(tr);
         }
 
-        $('progTv').textContent =
-            `final ${cvsProg.width}\u00d7${cvsProg.height}${sizeLimited ? ' @ ' + sizeTarget : ''} ` +
-            `(${progBytes} B in ${progRequests} requests, ${progMs.toFixed(1)} ms)`;
-        $('fullTv').textContent =
-            `final ${fullDec.width}\u00d7${fullDec.height} ` +
-            `(${fullBytes} B in ${fullRequests} request${fullRequests === 1 ? '' : 's'}, ${fullMs.toFixed(1)} ms)`;
+        const foot = (r, tv) => {
+            tv.textContent = `final ${dims(r)} @ reduction ${r.res.reduction} ` +
+                `(${r.res.steps.length} decode, ${fmtBytes(pixels(r))} px, ${r.ms.toFixed(1)} ms)`;
+        };
+        foot(a, $('progTv'));
+        foot(b, $('onceTv'));
+        foot(c, $('fullTv'));
 
-        status(pixelsOk
-            ? (sizeLimited
-                ? 'Compare done: size-limited progressive matches the full image at that display size.'
-                : 'Comparison done: progressive and full load produce IDENTICAL pixels.')
-            : (sizeLimited
-                ? 'Comparison done: pixels DIFFER at the display size (quality layers not yet loaded).'
-                : 'Comparison done: progressive and full load DIFFER in pixels.'));
+        status(`Done. A ${a.ms.toFixed(0)} ms / B ${b.ms.toFixed(0)} ms / C ${c.ms.toFixed(0)} ms. ` +
+            `Decoded ${fmtBytes(pixels(a))} / ${fmtBytes(pixels(b))} / ${fmtBytes(pixels(c))} sample pixels.`);
     }
+
 </script>
 </body>
 </html>

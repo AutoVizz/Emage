@@ -165,6 +165,17 @@
         <span>AES IV (hex, 16 bytes):</span>
         <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="42">
     </div>
+    <div class="row">
+        <span>Access level (highest readable level, 0 = coarsest; blank = all):</span>
+        <input type="number" id="accessInput" placeholder="all" min="0" style="width:70px">
+    </div>
+    <p style="margin:6px 0 0; color:#9a9; font-size:12px;">
+        The master key derives one key per DWT resolution level
+        (K0 = key, K1 = SHA3-256(K0), ...). This is the highest level you hold:
+        with K0..K<em>a</em> the client requests only levels 0..a from the server and
+        decodes no finer than that. A finer request is clamped rather than
+        satisfied with an approximate image.
+    </p>
 </div>
 
 <div class="card">
@@ -221,7 +232,12 @@
             baseUrl: $('serverUrl').value,
             imagePath: $('imgPath').value,
         });
-        emage.setCrypto({ key: $('keyInput').value, iv: $('ivInput').value });
+        emage.setCrypto({
+            key: $('keyInput').value,
+            iv: $('ivInput').value,
+            accessLevel: $('accessInput').value.trim() === '' ? -1
+                : Number($('accessInput').value),
+        });
     }
 
     // Lazy-load both WASM modules through the library (cache-busted by the server).

@@ -1,3 +1,7 @@
+// One protected zone per DWT resolution level in the SEC marker, so the
+// resolution pyramid is bounded by the size of that zone table.
+const MAX_RESOLUTIONS = 64;
+
 export class EmageError extends Error {
     constructor(message, options) {
         super(message, options);
@@ -125,7 +129,11 @@ export class Emage {
         this.encoder = null;
         this.decoder = null;
         this.server = { baseUrl: '', imagePath: '', password: '' };
-        this.crypto = { key: null, iv: null, levels: null };
+        // accessLevel is the highest DWT resolution level the caller may read,
+        // counted coarse-first (0 = the 1-pixel approximation). The granular key
+        // chain K0..K_accessLevel is derived from `key` on demand, so a smaller
+        // number means a coarser, cheaper image.
+        this.crypto = { key: null, iv: null, accessLevel: null };
         this.j2k = null;
         this.progress = null;
     }
@@ -186,11 +194,39 @@ export class Emage {
         return this;
     }
 
+    // Configure encryption.
+    //
+    //   key         32-byte AES-256 master key (hex string, array, or Uint8Array)
+    //   iv          16-byte counter block
+    //   accessLevel highest DWT resolution level this caller may read, counted
+    //               coarse-first: 0 is the 1-pixel approximation, and the finest
+    //               level is `numResolutions - 1`. Use 'all' or -1 for every
+    //               level. Defaults to -1.
+    //
+    // The master key derives a chain of per-level keys — K0 is the master key
+    // itself, and K(i+1) = SHA3-256(Ki) — and each level's packet data is
+    // encrypted under its own key. Holding K0..Ka therefore reconstructs the
+    // image at resolution level a and nothing finer; the levels above stay
+    // encrypted. The chain is derived locally and is never sent to the server.
     setCrypto(config = {}) {
         if (config.key !== undefined) this.crypto.key = this._toBytes(config.key, 'key');
         if (config.iv !== undefined) this.crypto.iv = this._toBytes(config.iv, 'iv');
-        if (config.levels !== undefined) this.crypto.levels = config.levels;
+        // `levels` was the old cascade-round count and is no longer meaningful:
+        // every level is now its own protected zone under its own derived key.
+        const level = config.accessLevel ?? config.levels;
+        if (level !== undefined && level !== null) {
+            this.crypto.accessLevel = this._accessLevel(level);
+        }
         return this;
+    }
+
+    // Accept a resolution level index, or the string "all" for every level.
+    _accessLevel(value) {
+        if (value === 'all' || value === -1) return -1;
+        if (!Number.isInteger(value) || value < 0) {
+            throw new EmageError('accessLevel must be a non-negative integer, "all", or -1');
+        }
+        return value;
     }
 
     resetProgressive() {
@@ -205,7 +241,7 @@ export class Emage {
         throw new EmageError(`${name} must be a hex string, array, or Uint8Array`);
     }
 
-    // AES-256 cascade: the key is 32 bytes, the IV 16 bytes, for every level.
+    // AES-256 master key: 32 bytes, whatever access level is configured.
     _bytesKey(value, name) {
         if (value == null || value.length === 0) {
             throw new EmageError(`${name} is required (AES-256: exactly 32 bytes)`);
@@ -228,9 +264,36 @@ export class Emage {
         return bytes;
     }
 
+    // Number of readable resolution levels implied by an access level, or null
+    // when the caller asked for every level.
     _levels(value) {
-        if (Number.isInteger(value) && value >= 1) return value;
+        if (Number.isInteger(value) && value >= 0) return value;
         return null;
+    }
+
+    // The granular key chain as lowercase hex strings, K0 first.
+    //
+    // `count` defaults to the number of levels the current access level grants
+    // (accessLevel + 1). It has no default for accessLevel 'all' / -1: the number
+    // of levels in the file is not known until the server reports it, so pass one
+    // explicitly — `upload()` does this with the `layers` value from its result.
+    // Pass a count larger than the grant allows to list every key for backup.
+    // Derived locally from the master key; the result is not transmitted anywhere.
+    granularKeys(count) {
+        if (!this.encoder) throw new EmageError('Encoder module not initialized');
+        const key = this._bytesKey(this.crypto.key, 'key');
+        if (count == null) {
+            const grant = this.crypto.accessLevel;
+            if (grant == null || grant < 0) {
+                throw new EmageError(
+                    'granularKeys needs a level count: with accessLevel "all" the file\'s resolution ' +
+                    'count is not known here (pass one, e.g. the `layers` value from an upload result)');
+            }
+            count = grant + 1;
+        }
+        const n = this._levels(count);
+        if (n == null || n < 1) throw new EmageError('granularKeys needs a level count');
+        return this.encoder.deriveGranularKeys(key, Math.min(n, 64));
     }
 
     _message(err) {
@@ -260,20 +323,32 @@ export class Emage {
         const rawIv = opts.iv ?? this.crypto.iv;
         const key = (rawKey != null && rawKey.length) ? this._bytesKey(rawKey, 'key') : null;
         const iv = (rawIv != null && rawIv.length) ? this._bytesIv(rawIv, 'iv') : null;
-        // 0 = "read the cascade count from the SEC marker"; an explicit value
-        // is only needed for header-less layer windows (no marker present).
-        const levels = this._levels(opts.levels ?? this.crypto.levels) ?? 0;
+        // Highest readable resolution level, coarse-first. -1 means every level
+        // the file holds. The native side clamps the requested reduction to what
+        // this grant can actually reconstruct, so a finer ask is never honoured
+        // with a fabricated image.
+        const accessLevel = this._accessLevel(
+            opts.accessLevel ?? opts.levels ?? this.crypto.accessLevel ?? -1);
+        // Number of DWT halvings the decoder should apply. 0 is the full
+        // resolution; n decodes only the n-th coarsest resolution level, so the
+        // decoder never materializes the finer subbands. The native side clamps
+        // this to the codestream's decomposition count and reports both the
+        // clamped value and the count back, so an out-of-range value is not an
+        // error and callers never have to guess the decomposition depth.
+        const reduction = Math.max(0, Math.trunc(opts.reduction) || 0);
         const dec = this.decoder;
         const ptr = dec._malloc(stream.length);
         try {
             dec.HEAPU8.set(stream, ptr);
             try {
-                const out = dec.decodeRaw(ptr, stream.length, key, iv, levels);
+                const out = dec.decodeRaw(ptr, stream.length, key, iv, accessLevel, reduction);
                 return {
                     width: out.width,
                     height: out.height,
                     numComponents: out.numComponents,
                     rgbaPixels: out.rgbaPixels,
+                    reduction: out.reduction != null ? out.reduction : reduction,
+                    numResolutions: out.numResolutions || 0,
                 };
             } catch (err) {
                 throw new EmageError(this._message(err), { cause: err });
@@ -289,17 +364,17 @@ export class Emage {
         return result;
     }
 
-    paintTo(canvas, result) {
-        canvas.width = result.width;
-        canvas.height = result.height;
-        canvas.getContext('2d').putImageData(
-            new ImageData(result.rgbaPixels, result.width, result.height), 0, 0);
-    }
-
-    // Paint a decoded frame scaled into a fixed-size canvas. If no target
-    // dimensions are given, falls back to painting at the decoded resolution.
-    _paintScaled(canvas, result, dims) {
-        if (!dims) return this.paintTo(canvas, result);
+    // Paint a decoded frame. When dims is given the frame is scaled into those
+    // canvas dimensions with high-quality smoothing instead of being painted at
+    // the decoded resolution; passing no dims paints at native size.
+    paintTo(canvas, result, dims) {
+        if (!dims) {
+            canvas.width = result.width;
+            canvas.height = result.height;
+            canvas.getContext('2d').putImageData(
+                new ImageData(result.rgbaPixels, result.width, result.height), 0, 0);
+            return;
+        }
         canvas.width = dims.width;
         canvas.height = dims.height;
         const ctx = canvas.getContext('2d');
@@ -318,15 +393,26 @@ export class Emage {
         ctx.drawImage(tmp, 0, 0, dims.width, dims.height);
     }
 
+    // Report the per-resolution protection a codestream declares, without
+    // decrypting it: `zoneCount` zones (one per DWT resolution level, coarse
+    // first), each `starts[i]` bytes into the packet payload and `sizes[i]`
+    // bytes long. `hasSec` is 0 for an unencrypted stream.
     describeSecurityZone(stream) {
         if (!this.decoder) throw new EmageError('Decoder module not initialized');
-        if (!stream || !stream.length) return { hasSec: 0, zoneStart: 0, zoneSize: 0, levels: 0 };
+        if (!stream || !stream.length) {
+            return { hasSec: 0, zoneCount: 0, starts: [], sizes: [] };
+        }
         const dec = this.decoder;
         const ptr = dec._malloc(stream.length);
         try {
             dec.HEAPU8.set(stream, ptr);
             const z = dec.describeSecurityZone(ptr, stream.length);
-            return { hasSec: z.hasSec, zoneStart: z.zoneStart, zoneSize: z.zoneSize, levels: z.levels };
+            return {
+                hasSec: z.hasSec,
+                zoneCount: z.zoneCount,
+                starts: Array.from(z.starts),
+                sizes: Array.from(z.sizes),
+            };
         } finally {
             dec._free(ptr);
         }
@@ -378,16 +464,28 @@ export class Emage {
             enableSop: opts.enableSop ?? false,
             enableEph: opts.enableEph ?? false,
             enableTlm: opts.enableTlm ?? true,
-            enablePlt: opts.enablePlt ?? true,
             enableSec: opts.enableSec ?? true,
-            levels: this._levels(opts.levels ?? this.crypto.levels) ?? 1,
         };
+        // Same required-field rule as key/iv below: the binding declares
+        // numLayers as required, so it must always be present. The encoder only
+        // ever writes one lossless quality layer, so 1 is the honest value.
         const numLayers = this._layerCount(opts.numLayers);
-        if (numLayers != null) encOpts.numLayers = numLayers;
-        if (encOpts.enableSec) {
-            encOpts.key = this._bytesKey(opts.key ?? this.crypto.key, 'key');
-            encOpts.iv = this._bytesIv(opts.iv ?? this.crypto.iv, 'iv');
+        encOpts.numLayers = numLayers != null ? numLayers : 1;
+        // One protected zone per resolution level, so the SEC marker's zone table
+        // caps the pyramid at 64 levels. Checked here to fail with a useful message
+        // instead of the binding's generic range error.
+        if (!Number.isInteger(encOpts.numResolutions) ||
+            encOpts.numResolutions < 1 || encOpts.numResolutions > MAX_RESOLUTIONS) {
+            throw new EmageError(
+                `numResolutions must be between 1 and ${MAX_RESOLUTIONS} ` +
+                `(got ${encOpts.numResolutions})`);
         }
+        // key/iv are always present in the options object. The binding declares
+        // them as required fields, so omitting them entirely throws "Missing
+        // field" rather than meaning "unencrypted"; null is what selects the
+        // unencrypted path.
+        encOpts.key = encOpts.enableSec ? this._bytesKey(opts.key ?? this.crypto.key, 'key') : null;
+        encOpts.iv = encOpts.enableSec ? this._bytesIv(opts.iv ?? this.crypto.iv, 'iv') : null;
 
         const enc = this.encoder;
         const ptr = enc._malloc(data.length);
@@ -411,17 +509,23 @@ export class Emage {
         return this.encodePixelData(imageData.data, canvas.width, canvas.height, opts);
     }
 
-    // Lowest-level server primitive: fetch a layer window. Kept private so
+    // Lowest-level server primitive: fetch the whole codestream. Kept private so
     // callers interact with the abstracted meta()/preview()/display() API.
-    async _window(layers) {
-        const resp = await fetch(this._imageUrl(), { headers: { 'X-Emage-Layers': String(layers) } });
+    async _stream() {
+        // Ask only for the levels this key grant can actually read. Levels are
+        // counted coarse-first, so the window is 0:accessLevel. Finer levels
+        // would be fetched only to be discarded, since the decoder cannot
+        // reconstruct anything past the grant.
+        const grant = this.crypto.accessLevel;
+        const spec = (grant == null || grant < 0) ? 'all' : '0:' + grant;
+        const resp = await fetch(this._imageUrl(), { headers: { 'X-Emage-Layers': spec } });
         const body = await resp.arrayBuffer();
         if (!resp.ok) {
             let text = '';
             try { text = new TextDecoder().decode(body); } catch (_) { /* ignore */ }
             throw new EmageServerError('HTTP ' + resp.status + ' ' + text.trim());
         }
-        return { bytes: new Uint8Array(body), headers: resp.headers };
+        return new Uint8Array(body);
     }
 
     async meta() {
@@ -443,6 +547,15 @@ export class Emage {
         return data;
     }
 
+    // Upload a codestream and return the server's response, enriched with the
+    // granular keys.
+    //
+    // `granularKeys` on the returned object is an array of hex strings, one per
+    // DWT resolution level (coarse-first), derived in this browser from the
+    // master key. It is attached client-side after the round trip — the server
+    // never receives or returns key material, since the bytes were encrypted
+    // before upload. It is null when no master key is configured or the stream
+    // carries no SEC marker.
     async upload(j2k, opts = {}) {
         const data = j2k || this.j2k;
         if (!data) throw new EmageError('Nothing to upload — encode an image first.');
@@ -451,7 +564,13 @@ export class Emage {
         }
         const resp = await fetch(this._imageUrl(), {
             method: 'POST',
-            headers: { 'X-Emage-Password': opts.password ?? this.server.password },
+            headers: {
+                'X-Emage-Password': opts.password ?? this.server.password,
+                // Declared per the OpenAPI upload contract. The server ignores the
+                // value, but sending a body without a Content-Type makes the browser
+                // default it to text/plain, which is a lie about the bytes on the wire.
+                'Content-Type': 'image/jp2',
+            },
             body: data,
         });
         const out = await parseJson(resp);
@@ -459,6 +578,18 @@ export class Emage {
             throw new EmageServerError('HTTP ' + resp.status + ' ' + JSON.stringify(out));
         }
         this.progress = null;
+        // The per-resolution keys are derived here, client-side, and attached to
+        // the response so a caller can save or distribute them. They are never
+        // sent to the server: the codestream was encrypted before upload and the
+        // server only ever saw ciphertext.
+        if (this.crypto.key && this.crypto.key.length) {
+            try {
+                out.granularKeys = this.granularKeys(out.layers || out.numResolutions || null);
+            } catch (_) {
+                // A non-granular or unreadable stream simply reports no keys.
+                out.granularKeys = null;
+            }
+        }
         return out;
     }
 
@@ -478,170 +609,186 @@ export class Emage {
         return out;
     }
 
-    static finalizeStream(data, numLayers, layerCountOffset, tilePsotOffsets) {
-        const out = new Uint8Array(data.length + 2);
-        out.set(data, 0);
-        out[data.length] = 0xff;
-        out[data.length + 1] = 0xd9;
-        if (layerCountOffset >= 0) {
-            out[layerCountOffset] = (numLayers >> 8) & 0xff;
-            out[layerCountOffset + 1] = numLayers & 0xff;
+    // Decode the codestream at a descending series of DWT resolution levels.
+    //
+    // The codestream is fetched once in full — resolution levels are spatially
+    // nested, not bandwidth-separable, so a reduced-resolution decode still needs
+    // every byte. What the reduction buys is work: resolution r decodes
+    // ceil(W / 2^(NL-r)) square, so the decoder never MQ-decodes the code blocks
+    // above r, never allocates the finer subband coefficient arrays, and never
+    // runs the high-pass synthesis path. Starting coarser than the target and
+    // walking down to it costs only a small multiple of the final decode
+    // (1 + 1/4 + 1/16 ... for a halving series) and yields every intermediate
+    // frame for free, because each earlier frame is a quarter the samples of the
+    // one after it. That is the opposite of quality-layer truncation, where the
+    // first frame already costs a full-resolution raster and each later frame
+    // re-runs the passes of all its predecessors.
+    async _loadResolutions(reduction, opts = {}, meta) {
+        if (!meta) meta = await this.meta();
+        const stream = await this._stream();
+        const progressive = opts.progressive !== false;
+
+        // The codestream's decomposition count caps the useful range, and only
+        // the decoder knows it. Prefer the server's declaration, but do not
+        // require it. A progressive pass has to know the bound before it can
+        // choose where to start, so when the server is silent it probes: a
+        // reduction far past any real codestream is clamped to the coarsest
+        // level, which makes the probe the cheapest possible decode and hands
+        // back the count. Without the bound the loop would instead overshoot
+        // and re-decode a level the native side clamps away. A one-shot decode
+        // never needs the bound, so it never probes -- it just lets the native
+        // side clamp and takes the value the decoder reports back.
+        const requested = Math.max(0, Math.trunc(reduction) || 0);
+        // 'layers' is the server's count of DWT resolution levels (see openapi.yaml
+        // MetaResponse). This project does not use JPEG 2000 quality layers, so that
+        // is the only progression bound the server reports. numResolutions is kept as
+        // an alias so a caller that already carries the count from elsewhere does not
+        // trigger a probe.
+        let numResolutions = meta.layers || meta.numResolutions || 0;
+        let probe = null;
+        if (!numResolutions && progressive) {
+            probe = this.decode(stream, { ...opts, reduction: 31 });
+            numResolutions = probe.numResolutions || 0;
         }
-        for (const po of tilePsotOffsets) {
-            const sotStart = po - 6;
-            const psot = data.length - sotStart;
-            out[po] = (psot >>> 24) & 0xff;
-            out[po + 1] = (psot >> 16) & 0xff;
-            out[po + 2] = (psot >> 8) & 0xff;
-            out[po + 3] = psot & 0xff;
+        // Unknown (0) means no bound; a declared count of 1 means a flat
+        // codestream whose only valid reduction is 0.
+        const maxReduction = numResolutions > 0 ? numResolutions - 1 : Infinity;
+        const end = Math.min(requested, maxReduction);
+        const early = Math.max(0, Math.trunc(opts.previewSteps ?? 2));
+        let start = end;
+        if (progressive) {
+            start = !Number.isFinite(maxReduction) ? end + early
+                // Climbing to full resolution is the classic progressive
+                // experience, so start at the coarsest level. For a reduced
+                // target, start a few levels early instead, skipping the ones
+                // the target does not need.
+                : end === 0 ? maxReduction
+                : Math.min(end + early, maxReduction);
         }
-        return out;
+
+        const steps = [];
+        // Count real decoder invocations, not frames. A discovery decode is
+        // counted whether or not its level is reused, so the figure stays honest.
+        // Reuse only happens when the probe's level is the one the loop starts
+        // at; widening the sequence to include it just to save the decode would
+        // paint a frame smaller than previewSteps asked for, so the probe can
+        // legitimately go unused.
+        let decodes = probe ? 1 : 0;
+        let probeUsed = false;
+        for (let r = start; r >= end; --r) {
+            // The probe already decoded the coarsest level; reuse it rather
+            // than paying for the identical decode twice.
+            let decoded;
+            if (!probeUsed && probe && probe.reduction === r) {
+                decoded = probe;
+                probeUsed = true;
+            } else {
+                decoded = this.decode(stream, { ...opts, reduction: r });
+                ++decodes;
+            }
+            if (opts.canvas) this.paintTo(opts.canvas, decoded, opts.displayDims);
+            const isLast = r === end;
+            const st = {
+                layer: steps.length + 1,
+                // Kept for onLayer compatibility; the count is the number of
+                // steps actually performed, which is only final once the last
+                // step has run.
+                totalLayers: progressive ? start - end + 1 : 1,
+                reduction: decoded.reduction != null ? decoded.reduction : r,
+                complete: isLast,
+                assembledBytes: stream.length,
+                appendedBytes: 0,
+                pixels: decoded.width * decoded.height,
+                width: decoded.width,
+                height: decoded.height,
+                decoded,
+            };
+            steps.push(st);
+            if (typeof opts.onLayer === 'function') {
+                opts.onLayer({
+                    layer: st.layer,
+                    totalLayers: st.totalLayers,
+                    complete: st.complete,
+                    assembledBytes: stream.length,
+                    reduction: st.reduction,
+                    width: decoded.width,
+                    height: decoded.height,
+                });
+            }
+            // Yield to the browser's renderer after each paint so every frame is
+            // actually shown, not coalesced away into the final one.
+            if (opts.canvas && !isLast) await this._yieldForPaint();
+        }
+        const last = steps[steps.length - 1];
+        return {
+            meta,
+            steps,
+            decoded: last.decoded,
+            stream,
+            reduction: last.reduction,
+            numResolutions: numResolutions || last.decoded.numResolutions || 0,
+            decodes,
+            complete: true,
+        };
     }
 
-    // Fetch the first quality layer and decode a low-quality preview.
+    // Fetch the codestream and decode the coarsest resolution level that still
+    // carries a usable thumbnail.
     async preview(opts = {}) {
-        const out = await this._loadLayers(1, opts);
+        const meta = await this.meta();
+        const reduction = this._minResolutionForSize(opts.thumbSize ?? 160, meta);
+        const out = await this._loadResolutions(reduction, { ...opts, progressive: false }, meta);
         return { ...out, kind: 'preview' };
     }
 
-    // Progressively load every quality layer from coarsest to finest.
+    // Fetch the codestream and decode every resolution level, coarsest first.
     async playAll(opts = {}) {
         return this.display('all', opts);
     }
 
-    // Progressively load only the quality layers needed to render the image at
-    // the requested display size, decoding (and optionally painting each frame
-    // when opts.canvas is given) layer by layer until that size is reached.
+    // Fetch the codestream and decode only the resolution levels needed to
+    // render at the requested display size, painting (and optionally yielding
+    // after) each one when opts.canvas is given.
     // target: px number, '100px', '10vw', '30vh', '50%', or 'all'/'100%'.
     async display(target, opts = {}) {
         const spec = resolveTarget(target);
         const meta = await this.meta();
         let targetDim = null;
-        let count;
-        if (spec.type === 'all') {
-            count = meta.layers;
-        } else {
+        let reduction = 0;
+        if (spec.type !== 'all') {
             targetDim = spec.type === 'pct'
                 ? Math.max(meta.width, meta.height) * spec.value
                 : spec.value;
-            count = this._minLayersForSize(targetDim, meta);
+            reduction = this._minResolutionForSize(targetDim, meta);
         }
-        // Resolve the requested size to concrete canvas pixels: at every
-        // progressive stage the image is rendered at exactly this size, never
-        // the full source resolution.
-        const dims = this._displayDims(meta, targetDim);
-        if (dims && opts.canvas) {
-            opts.canvas.width = dims.width;
-            opts.canvas.height = dims.height;
-        }
-        const out = await this._loadLayers(count, { ...opts, displayDims: targetDim != null ? dims : null }, meta);
+        const out = await this._loadResolutions(reduction, opts, meta);
+        const decoded = out.decoded;
         return {
             ...out,
             target,
-            loadMode: count >= meta.layers ? 'full' : 'size',
+            // Based on what the decoder actually applied, not what was asked
+            // for: a codestream with fewer levels than requested clamps to
+            // full resolution and should not claim otherwise.
+            loadMode: out.reduction > 0 ? 'size' : 'full',
             targetDimension: targetDim != null ? Math.round(targetDim) : null,
-            displaySize: dims,
+            displaySize: decoded ? { width: decoded.width, height: decoded.height } : null,
             fullDimension: Math.max(meta.width, meta.height),
-            loadedLayers: count,
-            totalLayers: meta.layers,
+            loadedLayers: out.steps.length,
+            totalLayers: out.steps.length,
         };
     }
 
-    // Compute canvas pixel dimensions for a display target while preserving the
-    // source aspect ratio. targetDim is the long-edge pixel dimension.
-    _displayDims(meta, targetDim) {
+    // How many DWT halvings bring the image down to a display size. Rounding up
+    // lands on the coarsest level that is still at or below the target, so the
+    // decoded raster is never more than 2x the target's area. Rounding down
+    // instead would guarantee an upscale, or cost 4x the samples decoding a level
+    // twice as large and letting the browser throw three quarters of it away.
+    _minResolutionForSize(targetDim, meta) {
+        if (!targetDim || !(targetDim > 0)) return 0;
         const fullW = meta.width || 0;
         const fullH = meta.height || 0;
-        if (!fullW || !fullH || !(targetDim > 0)) return null;
-        const scale = targetDim / Math.max(fullW, fullH);
-        return {
-            width: Math.max(1, Math.round(fullW * scale)),
-            height: Math.max(1, Math.round(fullH * scale)),
-        };
-    }
-
-    // Estimate how many quality layers are required to display the image at a
-    // given pixel dimension. Each additional layer roughly doubles the usable
-    // resolution (LRCP + rate allocation), so the needed layer count scales
-    // logarithmically with the full/display dimension ratio.
-    _minLayersForSize(targetDim, meta) {
-        if (!targetDim || !(targetDim > 0)) return meta.layers;
-        if (!meta.width || !meta.height) return meta.layers;
-        const fullDim = Math.max(meta.width, meta.height);
-        if (targetDim >= fullDim) return meta.layers;
-        const log2r = Math.log2(fullDim / targetDim);
-        return Math.max(1, Math.min(meta.layers, Math.ceil(meta.layers - log2r)));
-    }
-
-    async _loadLayers(count, opts = {}, meta) {
-        if (!meta) meta = await this.meta();
-        if (!meta.layers || meta.layers < 1) throw new EmageError('No layers to play');
-        count = Math.max(1, Math.min(count, meta.layers));
-        const first = await this._window('0');
-        const layerCountOffset = parseInt(first.headers.get('x-emage-layercountoffset') || '-1', 10);
-        const tilePsotOffsets = (first.headers.get('x-emage-tilepsotoffsets') || '')
-            .split(',').filter(Boolean).map(Number);
-        const st = {
-            image: this.server.imagePath,
-            layers: meta.layers,
-            data: first.bytes,
-            k: 1,
-            layerCountOffset,
-            tilePsotOffsets,
-        };
-        this.progress = st;
-        const steps = [];
-        let window = null;
-        for (let k = 1; k <= count; ++k) {
-            if (k > 1) {
-                window = await this._window(String(k - 1));
-                const next = new Uint8Array(st.data.length + window.bytes.length);
-                next.set(st.data, 0);
-                next.set(window.bytes, st.data.length);
-                st.data = next;
-                st.k = k;
-            }
-            const stream = Emage.finalizeStream(st.data, k, layerCountOffset, tilePsotOffsets);
-            const decoded = this._maybeDecode(stream, opts);
-            steps.push({
-                layer: k,
-                totalLayers: meta.layers,
-                complete: k >= meta.layers,
-                assembledBytes: st.data.length,
-                appendedBytes: k === 1 ? first.bytes.length : window.bytes.length,
-                stream,
-                decoded,
-            });
-            if (typeof opts.onLayer === 'function') {
-                opts.onLayer({
-                    layer: k,
-                    totalLayers: meta.layers,
-                    complete: k >= meta.layers,
-                    assembledBytes: st.data.length,
-                });
-            }
-            // Yield to the browser's renderer after each paint so every layer
-            // is actually shown, not coalesced away into the final frame.
-            if (opts.canvas && opts.decode !== false && k < count) await this._yieldForPaint();
-        }
-        const complete = count >= meta.layers;
-        this.progress = complete ? null : st;
-        return {
-            meta,
-            count,
-            steps,
-            complete,
-            decoded: steps[steps.length - 1].decoded,
-            stream: steps[steps.length - 1].stream,
-            patches: { layerCountOffset, tilePsotOffsets },
-        };
-    }
-
-    _maybeDecode(stream, opts) {
-        if (opts.decode === false) return null;
-        const decoded = this.decode(stream, opts);
-        if (opts.canvas) this._paintScaled(opts.canvas, decoded, opts.displayDims);
-        return decoded;
+        if (!fullW || !fullH) return 0;
+        return Math.max(0, Math.ceil(Math.log2(Math.max(fullW, fullH) / targetDim)));
     }
 
     // Hand control back to the browser long enough for the current canvas

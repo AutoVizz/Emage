@@ -200,8 +200,12 @@
         <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="42">
     </div>
     <div class="row">
-        <span>J2K layers (quality/SNR progression, max 100):</span>
-        <input type="number" id="layerInput" value="8" min="1" max="100" style="width:70px">
+        <span>J2K resolutions (DWT levels, max 100):</span>
+        <input type="number" id="layerInput" value="6" min="1" max="100" style="width:70px">
+    </div>
+    <div class="row">
+        <span>Access level (highest readable level, 0 = coarsest; blank = all):</span>
+        <input type="number" id="accessInput" placeholder="all" min="0" style="width:70px">
     </div>
     <div style="display:flex; gap:20px; flex-wrap:wrap;">
         <div>
@@ -240,6 +244,19 @@
         <button id="delBtn" disabled>Delete on server</button>
     </div>
     <div id="status"></div>
+    <div id="keysPanel" style="display:none; margin-top:14px; padding-top:12px; border-top:1px solid #333;">
+        <h3 style="margin:0 0 6px;">Granular progressive keys</h3>
+        <p style="margin:0 0 8px; color:#9a9; font-size:12px;">
+            One key per DWT resolution level, coarse-first. Level 0 is the 1-pixel
+            approximation. Hand a recipient K0..K<em>a</em> and they can decode the
+            image at that resolution and no finer — the levels above stay encrypted.
+            These are derived in the browser and are never sent to the server.
+        </p>
+        <div id="keysList" style="font-family:ui-monospace,monospace; font-size:11px; line-height:1.5;"></div>
+        <div class="row" style="margin-top:8px;">
+            <button id="copyKeysBtn" disabled>Copy all keys</button>
+        </div>
+    </div>
 </div>
 
 <script type="module">
@@ -266,13 +283,23 @@
             imagePath: $('imgPath').value,
             password: $('pwInput').value,
         });
-        emage.setCrypto({ key: $('keyInput').value, iv: $('ivInput').value });
+        emage.setCrypto({
+            key: $('keyInput').value,
+            iv: $('ivInput').value,
+            accessLevel: $('accessInput').value.trim() === '' ? -1
+                : Number($('accessInput').value),
+        });
     }
 
     function setJ2kDependent(enabled) {
         for (const id of ['downloadBtn', 'decodeBtn', 'upBtn', 'verifyBtn']) {
             $(id).disabled = !enabled;
         }
+        // The listed keys describe one specific uploaded stream. Reaching this with
+        // a freshly encoded or freshly loaded stream means those keys no longer
+        // belong to what is on screen, so clear them rather than leave a stale
+        // chain next to a different image.
+        showGranularKeys(null);
     }
 
     // Lazy-load both WASM modules through the library (cache-busted by the server).
@@ -323,6 +350,48 @@
     }
 
     // ---------------------------------------------------------------------
+    // Render the per-resolution keys the upload exposed. Kept as text nodes so
+    // the values are selectable and copyable without any HTML interpretation.
+    function showGranularKeys(keys, width, height) {
+        const panel = $('keysPanel');
+        const list = $('keysList');
+        list.textContent = '';
+        if (!keys || !keys.length) {
+            panel.style.display = 'none';
+            $('copyKeysBtn').disabled = true;
+            return;
+        }
+        panel.style.display = 'block';
+        $('copyKeysBtn').disabled = false;
+        const total = keys.length - 1;
+        keys.forEach((k, i) => {
+            // Holding K0..Ki reconstructs the image at resolution level i,
+            // which is reduction total - i.
+            const reduction = total - i;
+            const w = width ? Math.ceil(width / Math.pow(2, reduction)) : 0;
+            const h = height ? Math.ceil(height / Math.pow(2, reduction)) : 0;
+            const row = document.createElement('div');
+            row.textContent = `K${i}  level ${i}/${total}  ->  `
+                + (width ? `${w}x${h} (reduction ${reduction})` : `reduction ${reduction}`);
+            const val = document.createElement('div');
+            val.style.color = '#9cf';
+            val.textContent = '    ' + k;
+            list.appendChild(row);
+            list.appendChild(val);
+        });
+    }
+
+    async function onCopyKeys() {
+        const text = Array.from($('keysList').querySelectorAll('div'))
+            .map((d) => d.textContent.trim()).join('\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            status('granular keys copied to clipboard');
+        } catch (err) {
+            status('clipboard unavailable — select and copy manually: ' + fmtErr(err));
+        }
+    }
+
     // Server actions
     // ---------------------------------------------------------------------
 
@@ -336,6 +405,7 @@
             const data = await emage.upload(emage.j2k);
             status(`uploaded ${data.stored}: ${data.width}x${data.height}, ` +
                 `layers=${data.layers}, bytes=${data.bytes}`);
+            showGranularKeys(data.granularKeys, data.width, data.height);
             loadGallery();
         } catch (err) {
             status('upload error: ' + fmtErr(err));
@@ -439,6 +509,7 @@
     });
 
     $('upBtn').addEventListener('click', onUpload);
+    $('copyKeysBtn').addEventListener('click', onCopyKeys);
     $('verifyBtn').addEventListener('click', onVerify);
     $('delBtn').addEventListener('click', onDelete);
 
@@ -638,7 +709,7 @@
         try {
             syncConfig();
             emage.encodeCanvas(srcCanvas, {
-                numLayers: parseInt($('layerInput').value, 10),
+                numResolutions: parseInt($('layerInput').value, 10),
             });
         } catch (err) {
             status('Encoding error: ' + fmtErr(err));
