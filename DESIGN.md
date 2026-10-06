@@ -317,7 +317,14 @@ parsed table with `sec_ok_starts()`: offsets must never move backwards, and
 zone 0 must start inside the payload we hold. Trailing zones are **allowed to
 overrun**, because a stream previously truncated to fewer levels still carries
 the full zone table — and OpenJPEG ignores SEC entirely, so the header stays
-meaningful.
+meaningful. The monotonicity arithmetic is done in 64 bits, since `Z` and `T` are
+32-bit fields read straight out of the file and would otherwise be able to wrap.
+
+**Every zone range is clamped to the bytes actually present** before it is used
+for a read or a write. The SEC table is attacker-controlled input, and overrun
+zones are a legitimate case rather than a malformed one, so the overrun has to
+be tolerated in the *header* while being refused at the point of use (§6.3,
+§6.5).
 
 ### 6.3 Decrypting only what you may read
 
@@ -325,8 +332,11 @@ meaningful.
 
 1. Clamp `accessLevel` to the levels actually present (`-1` → last level).
 2. Derive `K0..K_accessLevel`.
-3. AES-256-CTR each zone `0..accessLevel` in place.
-4. Return the number of payload bytes those levels occupy.
+3. AES-256-CTR each zone `0..accessLevel` in place. Each zone's declared size is
+   clamped to `payload - Z`; a zone beginning past the payload is treated as
+   empty rather than trusted.
+4. Return the number of payload bytes those levels occupy, itself capped at the
+   payload length.
 
 Everything finer stays ciphertext.
 
@@ -355,7 +365,8 @@ When the caller holds fewer levels than the file contains, the codestream is
 rebuilt around just the accessible prefix:
 
 1. Copy everything through `payloadStart + keepBytes` (the end of the last
-   accessible zone).
+   accessible zone). `keepBytes` is clamped to the bytes actually held before it
+   becomes an iterator range.
 2. Patch `SOT`'s `Psot` to the new tile-part length (skipped when `Psot == 0`,
    which means "runs to end of file").
 3. Append `EOC`.
