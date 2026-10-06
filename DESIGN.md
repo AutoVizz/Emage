@@ -203,13 +203,11 @@ server cannot slice windows.
 a **minimally trimmed Mbed TLS** — only `aes.c`, `sha3.c`, `platform_util.c` are
 compiled.
 
-### 4.1 Self-test
-
-Both entry points run `jpsec_aes256_kat_self_test()` once (statically cached)
-against the published known-answer vectors: AES-256 (FIPS-197 C.3) and SHA3-256
-(empty input). A failure aborts encode/decode with
-`"AES-256-CTR / SHA3-256 KAT self-test failed"` rather than silently producing
-garbage.
+AES-256 and SHA3-256 are used as published, without runtime verification. A
+build with a misconfigured `mbedtls_config.h` would produce silently wrong
+ciphertext, since CTR has no checksum and a bad decode does not error — but
+AES and SHA3 are not re-checked in the encode and decode paths. Correctness
+rests on the vendored library and the test suites.
 
 ---
 
@@ -802,7 +800,7 @@ fixes ownership to `$APP_UID`.
 | Suite | Location | Scope |
 |---|---|---|
 | `dotnet test` | `Emage.Tests/J2kTests.cs` | 13 xUnit tests over slicing, markers, traversal |
-| `test_node.js` | EmageWasm | Polymorphic decode, granular crypto, KAT |
+| `test_node.js` | EmageWasm | Polymorphic decode, granular crypto |
 | `test_resolution.js` | EmageWasm | Reduction correctness and clamping |
 | `test_granular.js` | EmageWasm | Pixel-exact access-level matrix |
 | `test_progressive.mjs` | EmageClient | Level selection, ordering, decode counting |
@@ -881,7 +879,6 @@ rejected by `GET /image`.
 - SHA3-256 hash-chain key derivation, one key per resolution level
 - Per-level protected zones recorded in a JPSEC `SEC` marker
 - Public API to list the derived keys as hex
-- Known-answer self-test on AES-256 and SHA3-256 at every encode/decode
 
 **Access control**
 - `accessLevel` selects the finest reconstructible resolution
