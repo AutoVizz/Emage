@@ -163,7 +163,9 @@
     </div>
     <div class="row">
         <span>AES IV (hex, 16 bytes):</span>
-        <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="42">
+        <input type="text" id="ivInput" readonly
+               placeholder="read from the codestream" size="42">
+        <span class="sub">carried in the SEC marker; nothing to paste</span>
     </div>
     <div class="row">
         <span>Access level (highest readable level, 0 = coarsest; blank = all):</span>

@@ -278,8 +278,15 @@
     </div>
     <div class="row">
         <span>AES IV (hex, 16 bytes):</span>
-        <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="42">
+        <input type="text" id="ivInput" size="42">
+        <button id="newIvBtn" type="button">New IV</button>
     </div>
+    <p style="font-size:11px; margin:-2px 0 6px; color:#888;">
+        Generated randomly, afresh for every encode. It is not secret &mdash; it travels inside
+        the SEC marker so a reader can decrypt without being handed it &mdash; but it must not
+        repeat: reusing one IV under the same key gives two files an identical keystream, and
+        XORing them cancels it. Leave it alone unless you have a reason.
+    </p>
     <div class="row">
         <span>J2K resolutions (DWT levels, max 100):</span>
         <input type="number" id="layerInput" value="6" min="1" max="100" style="width:70px">
@@ -383,6 +390,32 @@
         return err instanceof EmageError ? err.message : Emage.messageOf(err);
     }
 
+    // A fresh counter block for every file. Under one master key, two files
+    // encrypted with the same IV share a keystream at every level, so XORing
+    // the two ciphertexts cancels the keystream and yields the XOR of the
+    // plaintexts -- a classic two-time pad. getRandomValues is the fix; a
+    // fixed constant in this box is the bug.
+    function randomIvHex() {
+        const iv = new Uint8Array(16);
+        const webcrypto = globalThis.crypto;
+        if (!webcrypto || !webcrypto.getRandomValues) {
+            status('crypto.getRandomValues unavailable: cannot generate a safe IV');
+            return null;
+        }
+        webcrypto.getRandomValues(iv);
+        return Array.from(iv, (b) => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function newIv() {
+        const hex = randomIvHex();
+        if (hex) $('ivInput').value = hex;
+        return hex;
+    }
+
+    $('newIvBtn').addEventListener('click', () => {
+        if (newIv()) status('new IV generated: ' + $('ivInput').value);
+    });
+
     // Push UI inputs into the library's mutable state.
     function syncConfig() {
         emage.setServer({
@@ -424,6 +457,7 @@
     Emage.init({ wasmBase: './cmake-build-wasm/' })
         .then((m) => {
             emage = m;
+            newIv();
             syncConfig();
             syncSecInputs();
             $('processBtn').disabled = false;
@@ -856,6 +890,11 @@ async function onCopyKeys() {
         status(`Encoding ${width}x${height}...`);
         const t0 = performance.now();
         try {
+            // A new counter block per encode, so two images from this page never
+            // share a keystream. Written into the SEC marker, so the reader does
+            // not have to be given it.
+            const iv = $('secInput').checked ? newIv() : $('ivInput').value;
+            if ($('secInput').checked && !iv) return;
             syncConfig();
             emage.encodeCanvas(srcCanvas, {
                 numResolutions: parseInt($('layerInput').value, 10),
@@ -872,7 +911,8 @@ async function onCopyKeys() {
         // A fresh encoded stream is encodable/decodable → enable server actions.
         setJ2kDependent(true);
         status(`Encoded to J2K in ${(performance.now() - t0).toFixed(1)} ms ` +
-            `(${emage.j2k.length} bytes)`);
+            `(${emage.j2k.length} bytes)` +
+            ($('secInput').checked ? ` — IV ${$('ivInput').value} (carried in the SEC marker)` : ''));
         decodeToCanvas(emage.j2k, 'Decoded local J2K');
     }
 </script>

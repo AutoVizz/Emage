@@ -192,11 +192,19 @@ which shifts every absolute offset in the file. Payload-relative offsets
 survive that rebuild unchanged — and because the MACs cover `Z` and `T`, they
 survive it too. §11.1 records the end-to-end test that proves it.
 
-**The IV travels in the marker.** It is not secret, and publishing it means a
-reader can decrypt a served window without being handed the counter block out
-of band. The decoder treats the marker's IV as authoritative for that
-codestream; a caller-supplied IV is only used for a stream with no SEC marker,
-which by definition has no encryption to undo.
+**The IV travels in the marker, and is random per file.** Publishing it means
+a reader can decrypt a served window without being handed the counter block out
+of band — the decoder takes it from the marker and requires nothing but the key
+and the codestream.
+
+Per-file randomness is a correctness requirement, not hygiene. CTR keystream is
+a function of `(key, IV, offset)`, so two files sharing a master key *and* an IV
+share a keystream at every level, and `C_A ⊕ C_B = P_A ⊕ P_B` — a two-time pad
+that hands an attacker the XOR of two plaintexts with no key knowledge. Because
+the IV rides in the marker there is no transport burden, so the uploader simply
+draws 16 bytes from `crypto.getRandomValues` **per encode** rather than asking
+for one. It is not secret (SP 800-38A treats it as public); it must merely not
+repeat.
 
 **No key material.** The marker never carries a key. Its presence is the only
 signal, and the server ignores it entirely (§7.3).
@@ -237,7 +245,7 @@ server cannot slice windows.
 |---|---|
 | Block cipher | AES-256 (`JPSEC_AES_KEY_BYTES = 32`) |
 | Mode | CTR (NIST SP 800-38A); encryption and decryption are the same operation |
-| IV | 16 bytes, shared across every level, carried in the SEC marker |
+| IV | 16 bytes, **random per file**, shared across every level, carried in the SEC marker |
 | Key derivation | `K(i+1) = SHA3-256(K(i))`, `K0 = master key` |
 | Integrity | cumulative SHA3-256 MAC chain, one tag per level |
 
@@ -276,7 +284,14 @@ Two consequences worth being explicit about:
   the key is unknown and a level's plaintext is a large structured body — but
   it is a verification oracle, not a confidentiality leak.
 
-### 4.2 Verification
+### 4.2 What a reader needs
+
+Only the master key and the codestream. The IV comes from the marker, and a
+caller-supplied IV is length-checked but then superseded. The access level
+selects which keys are held; the cumulative MAC (§4.1) is verified
+automatically over exactly the levels those keys reconstruct.
+
+### 4.3 Verification
 
 AES-256 and SHA3-256 are used as published, without runtime verification. A
 build with a misconfigured `mbedtls_config.h` would produce silently wrong
@@ -825,7 +840,9 @@ verifies — with rows inside the current access grant highlighted.
 ### `downloader.html` — progressive viewer
 Server URL/path; key/IV; `accessInput` for the grant. Breadcrumb file browser.
 Fetch meta; load full; load for a display size (`10vw` etc.). Canvas with stage
-label showing each progressive level. Every load reports the fetched stream's
+label showing each progressive level. The IV box is read-only — the decoder takes
+the counter block from the marker, so there is nothing to paste. Every load
+reports the fetched stream's
 protection in the status line — plaintext, or the zone count, active grant, and
 the truncated MAC that grant verifies.
 
@@ -900,6 +917,7 @@ fixes ownership to `$APP_UID`.
 | `test_granular_keys.mjs` | EmageClient | Public API: chain, clamping, window, keys |
 | `test_mac.js` | EmageWasm | Marker fields, MAC tampering, zone resizing |
 | `test_mac_server.mjs` | EmageClient | MAC survives a live-server window |
+| `test_random_iv.mjs` | EmageClient | Per-file IV, and no-IV decode |
 | `test_chain.mjs` | EmageClient | 85 checks against the **live** server |
 
 Fixtures: `encrypted.j2k`, `sample.lrcp.j2k`, `sample.rlcp.j2k`,
@@ -990,7 +1008,8 @@ rejected by `GET /image`.
 - Per-level protected zones recorded in a JPSEC `SEC` marker
 - Cumulative SHA3-256 MAC per level, covering the level's bytes *and* its
   position, verified on every decode with a constant-time compare
-- Counter block carried in the marker, so a served window needs no out-of-band IV
+- Counter block carried in the marker, drawn fresh per file, so a served window
+  needs no out-of-band IV and two files never share a keystream
 - Public API to list the derived keys and MACs as hex
 
 **Access control**
