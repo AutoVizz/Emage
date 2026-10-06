@@ -356,10 +356,19 @@
         }
 
         const meta = b.res.meta;
+        // Protection is reported from the fetched codestream itself, so the line
+        // is accurate for a plaintext image as well as an encrypted one.
+        let prot = 'protection unknown';
+        try {
+            const z = emage.describeSecurityZone(b.res.stream);
+            prot = z.hasSec
+                ? `encrypted, ${z.zoneCount} per-resolution zones`
+                : 'plaintext, no SEC marker';
+        } catch (_) { /* keep the unknown label */ }
         $('imgMeta').textContent =
             `${meta.width}x${meta.height}, ${meta.layers} layers, ` +
             `${b.res.numResolutions} resolutions, ` +
-            `${meta.bytes} bytes`;
+            `${meta.bytes} bytes, ${prot}`;
 
         // ---- metrics -------------------------------------------------------
         const pixels = r => r.res.steps.reduce((s, x) => s + x.pixels, 0);

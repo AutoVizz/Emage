@@ -256,6 +256,13 @@
         <button id="decodeBtn" disabled>Decrypt uploaded file</button>
     </div>
     <div class="row">
+        <label style="display:inline-flex; align-items:center; gap:6px;">
+            <input type="checkbox" id="secInput" checked>
+            <span>Encrypt — write a SEC marker and protect each resolution level
+                under its own derived key</span>
+        </label>
+    </div>
+    <div class="row">
         <span>AES Key (hex, 32 bytes):</span>
         <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
     </div>
@@ -376,6 +383,17 @@
         });
     }
 
+    // Grey out the crypto inputs when the SEC checkbox is cleared, so it is
+    // obvious they are not in play. Values are preserved, so re-checking
+    // restores whatever was typed.
+    function syncSecInputs() {
+        const on = $('secInput').checked;
+        $('keyInput').disabled = !on;
+        $('ivInput').disabled = !on;
+    }
+
+    $('secInput').addEventListener('change', syncSecInputs);
+
     function setJ2kDependent(enabled) {
         for (const id of ['downloadBtn', 'decodeBtn', 'upBtn', 'verifyBtn']) {
             $(id).disabled = !enabled;
@@ -392,6 +410,7 @@
         .then((m) => {
             emage = m;
             syncConfig();
+            syncSecInputs();
             $('processBtn').disabled = false;
             $('delBtn').disabled = false;
             drawDefaultPattern();
@@ -822,6 +841,10 @@ async function onCopyKeys() {
             syncConfig();
             emage.encodeCanvas(srcCanvas, {
                 numResolutions: parseInt($('layerInput').value, 10),
+                // Unchecked: a plaintext codestream with no SEC marker. The
+                // server stores and serves it identically, and the key/iv
+                // inputs are ignored.
+                enableSec: $('secInput').checked,
             });
         } catch (err) {
             status('Encoding error: ' + fmtErr(err));

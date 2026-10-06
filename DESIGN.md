@@ -403,8 +403,12 @@ plane. Output is a `Uint8ClampedArray` ready for `ImageData`.
 ### 6.8 `describeSecurityZone()`
 
 Reports `{ hasSec, zoneCount, starts, sizes }` **without decrypting** — lets the
-UI show which levels are already readable and which are still ciphertext. On an
-empty buffer it returns `{hasSec: 0, zoneCount: 0, starts: [], sizes: []}`.
+UI show which levels are already readable and which are still ciphertext.
+
+The native side leaves `starts`/`sizes` as `null` whenever the codestream has no
+SEC marker, so the JS wrapper normalises them to `[]`. That case is *every
+plaintext codestream*, not just an empty buffer — an earlier version only
+guarded the empty stream and `Array.from(null)` threw on anything unencrypted.
 
 ---
 
@@ -696,24 +700,49 @@ frames are coalesced away and only the last one is seen.
 
 Three standalone HTML pages, no build, sharing `emage.js`.
 
+### Plaintext codestreams
+
+Encryption is opt-out. `encodePixelData()` takes `enableSec` (default `true`);
+clearing it writes a codestream with **no SEC marker** and leaves the packet
+payload in the clear. Everything downstream already copes, because the crypto is
+polymorphic end to end:
+
+- `decode()` ignores a supplied key/IV when there is no SEC marker, and works
+  with none at all — so a plaintext image needs no credentials.
+- `describeSecurityZone()` reports `hasSec: 0`.
+- `upload()` returns `granularKeys: null`, gated on the stream actually carrying
+  a SEC marker rather than merely on a key being configured — otherwise a
+  plaintext upload would advertise keys that describe nothing.
+- The **server is unaffected**. Its parser has no notion of encryption, so
+  plaintext is stored, listed and windowed exactly like ciphertext. That is the
+  key-blind contract from §7.3, and it means one image store can hold both.
+
+The tradeoff is that the access-level control has nothing to act on for a
+plaintext image: without per-level keys there is no grant to enforce.
+
 ### `uploader.html` — encrypt & upload
 Server URL/path/password; file picker; **Encode & decode** round trip; download
-the encrypted `.j2k`; load and decrypt an uploaded file. Key/IV inputs;
-`layerInput` (resolution count); **`accessInput`** (access level, `all` default).
-Source and destination canvases with a stage label. Gallery: refresh listing,
-open, delete. Upload / **Verify roundtrip** / delete on server. A **derived-keys
-panel** (`keysPanel`/`keysList`/`copyKeysBtn`) listing the granular keys after
-upload with a copy-all button.
+the encrypted `.j2k`; load and decrypt an uploaded file. An **`secInput`**
+checkbox selects encrypted vs plaintext encoding and greys out the key/IV inputs
+when cleared. `layerInput` (resolution count); **`accessInput`** (access level,
+`all` default). Source and destination canvases with a stage label. Gallery:
+refresh listing, open, delete. Upload / **Verify roundtrip** / delete on server.
+A sticky **derived-keys table** on the right (`keysPanel`/`keysBody`/
+`copyKeysBtn`) listing one row per level — key, level index, the resolution it
+resolves to, and the key material — with rows inside the current access grant
+highlighted.
 
 ### `downloader.html` — progressive viewer
 Server URL/path; key/IV; `accessInput` for the grant. Breadcrumb file browser.
 Fetch meta; load full; load for a display size (`10vw` etc.). Canvas with stage
-label showing each progressive level.
+label showing each progressive level. Every load reports the fetched stream's
+protection in the status line — plaintext, or the zone count and active grant.
 
 ### `compare.html` — transfer strategy comparison
 Runs progressive vs one-shot vs full load side by side, three canvases with
 timing/value readouts, plus a summary table and a per-step table. This is the
-page that surfaces the `decodes` / `pixels` / `assembledBytes` counters.
+page that surfaces the `decodes` / `pixels` / `assembledBytes` counters, and it
+appends the stream's protection state to the metadata line.
 
 ---
 
@@ -868,6 +897,14 @@ rejected by `GET /image`.
 - `Psot` correction and EOC termination
 - Subsampled-component-aware planar→RGBA conversion
 
+**Plaintext codestreams**
+- Opt-out encryption per encode (`enableSec: false`)
+- No SEC marker written; packet payload left in the clear
+- Decode needs no key or IV; a supplied one is ignored
+- Zone introspection degrades to `hasSec: 0` with empty arrays
+- `upload()` reports no derived keys for an unencrypted stream
+- One server image store holds encrypted and plaintext files indistinguishably
+
 **Server**
 - Marker-only codestream parsing (works on encrypted streams)
 - Layer-window serving with correct framing and `Psot` patching
@@ -891,3 +928,6 @@ rejected by `GET /image`.
 - Encrypt-and-upload page with gallery management and key display
 - Progressive viewer with breadcrumb browser and staged rendering
 - Side-by-side transfer-strategy comparison with timing tables
+- Encrypted/plaintext toggle on the uploader; per-load protection reporting on
+  the downloader and comparison pages
+- Derived-key table with the granted rows highlighted

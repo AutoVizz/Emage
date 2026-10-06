@@ -410,8 +410,12 @@ export class Emage {
             return {
                 hasSec: z.hasSec,
                 zoneCount: z.zoneCount,
-                starts: Array.from(z.starts),
-                sizes: Array.from(z.sizes),
+                // The native side leaves starts/sizes null whenever there is no
+                // SEC marker -- which is every plaintext codestream, not just an
+                // empty buffer -- so normalise here instead of trusting the
+                // arrays. Array.from(null) throws.
+                starts: z.starts ? Array.from(z.starts) : [],
+                sizes: z.sizes ? Array.from(z.sizes) : [],
             };
         } finally {
             dec._free(ptr);
@@ -582,12 +586,25 @@ export class Emage {
         // the response so a caller can save or distribute them. They are never
         // sent to the server: the codestream was encrypted before upload and the
         // server only ever saw ciphertext.
+        // The per-resolution keys describe an encrypted codestream, so only
+        // report them when this one actually carries a SEC marker. A plaintext
+        // stream has no zones to list, even when a master key is configured for
+        // the rest of the session.
+        out.granularKeys = null;
         if (this.crypto.key && this.crypto.key.length) {
+            let hasSec = false;
             try {
-                out.granularKeys = this.granularKeys(out.layers || out.numResolutions || null);
+                hasSec = this.describeSecurityZone(data).hasSec === 1;
             } catch (_) {
-                // A non-granular or unreadable stream simply reports no keys.
-                out.granularKeys = null;
+                hasSec = false;
+            }
+            if (hasSec) {
+                try {
+                    out.granularKeys = this.granularKeys(out.layers || out.numResolutions || null);
+                } catch (_) {
+                    // A non-granular or unreadable stream simply reports no keys.
+                    out.granularKeys = null;
+                }
             }
         }
         return out;

@@ -419,13 +419,36 @@
 
     $('browseBtn').addEventListener('click', refreshFs);
 
+    // Describe the protection the fetched codestream declares, without
+    // decrypting it. A plaintext stream carries no SEC marker and needs no
+    // key at all; an encrypted one reports one zone per resolution level.
+    function protectionNote(stream) {
+        let z;
+        try {
+            z = emage.describeSecurityZone(stream);
+        } catch (err) {
+            return 'protection unknown (' + fmtErr(err) + ')';
+        }
+        if (!z.hasSec) {
+            return 'plaintext — no SEC marker, key/IV not required';
+        }
+        const key = emage.crypto && emage.crypto.key;
+        if (!key || !key.length) {
+            return `encrypted — ${z.zoneCount} per-resolution zones, but no key set, ` +
+                'so decoding will fail';
+        }
+        const grant = emage.crypto.accessLevel;
+        return `encrypted — ${z.zoneCount} per-resolution zones, ` +
+            `grant ${grant == null || grant < 0 ? 'all levels' : '0..' + grant}`;
+    }
+
     // Progressively load every quality layer into dstCanvas.
     async function onFull() {
         try {
             syncConfig();
             const out = await emage.playAll({ canvas: dstCanvas, onLayer });
             status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers ` +
-                `(${out.stream.length} bytes)`);
+                `(${out.stream.length} bytes) — ${protectionNote(out.stream)}`);
         } catch (err) {
             status('load-full error: ' + fmtErr(err));
         }
@@ -439,7 +462,7 @@
             const out = await emage.display($('sizeInput').value, { canvas: dstCanvas, onLayer });
             status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers — ` +
                 `rendered ${out.displaySize.width}x${out.displaySize.height} ` +
-                `(${out.stream.length} bytes)`);
+                `(${out.stream.length} bytes) — ${protectionNote(out.stream)}`);
         } catch (err) {
             status('size load error: ' + fmtErr(err));
         }
