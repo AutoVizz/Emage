@@ -834,17 +834,17 @@ when cleared. `layerInput` (resolution count); **`accessInput`** (access level,
 refresh listing, open, delete. Upload / **Verify roundtrip** / delete on server.
 A sticky **derived-keys table** on the right (`keysPanel`/`keysBody`/
 `copyKeysBtn`) listing one row per level — key, level index, the resolution it
-resolves to, the key material, and the cumulative **MAC** a holder of `K0..Ki`
-verifies — with rows inside the current access grant highlighted.
+resolves to, and the key material — with rows inside the current access grant
+highlighted. Integrity is not a column: MACs are verified on every decode and
+are not something the user acts on.
 
 ### `downloader.html` — progressive viewer
 Server URL/path; key/IV; `accessInput` for the grant. Breadcrumb file browser.
 Fetch meta; load full; load for a display size (`10vw` etc.). Canvas with stage
-label showing each progressive level. The IV box is read-only — the decoder takes
-the counter block from the marker, so there is nothing to paste. Every load
-reports the fetched stream's
-protection in the status line — plaintext, or the zone count, active grant, and
-the truncated MAC that grant verifies.
+label showing each progressive level. Neither the IV nor the MACs are surfaced:
+both are internal to the format and the decoder handles them. Every load reports
+the fetched stream's protection in the status line — plaintext, or the zone
+count and active grant.
 
 ### `compare.html` — transfer strategy comparison
 Runs progressive vs one-shot vs full load side by side, three canvases with
@@ -1010,7 +1010,8 @@ rejected by `GET /image`.
   position, verified on every decode with a constant-time compare
 - Counter block carried in the marker, drawn fresh per file, so a served window
   needs no out-of-band IV and two files never share a keystream
-- Public API to list the derived keys and MACs as hex
+- Public API to list the derived keys as hex (`macs` and `iv` also come back from
+  `upload()` for callers that want them; the UI shows neither)
 
 **Access control**
 - `accessLevel` selects the finest reconstructible resolution

@@ -162,12 +162,6 @@
         <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
     </div>
     <div class="row">
-        <span>AES IV (hex, 16 bytes):</span>
-        <input type="text" id="ivInput" readonly
-               placeholder="read from the codestream" size="42">
-        <span class="sub">carried in the SEC marker; nothing to paste</span>
-    </div>
-    <div class="row">
         <span>Access level (highest readable level, 0 = coarsest; blank = all):</span>
         <input type="number" id="accessInput" placeholder="all" min="0" style="width:70px">
     </div>
@@ -236,7 +230,6 @@
         });
         emage.setCrypto({
             key: $('keyInput').value,
-            iv: $('ivInput').value,
             accessLevel: $('accessInput').value.trim() === '' ? -1
                 : Number($('accessInput').value),
         });
@@ -445,15 +438,8 @@
                 'so decoding will fail';
         }
         const grant = emage.crypto.accessLevel;
-        const level = (grant == null || grant < 0) ? z.zoneCount - 1 : Math.min(grant, z.zoneCount - 1);
-        let mac = '';
-        if (z.macs && z.macs.length >= (level + 1) * 32) {
-            const hex = Array.from(z.macs.slice(level * 32, level * 32 + 32))
-                .map((b) => b.toString(16).padStart(2, '0')).join('');
-            mac = ` · MAC[${level}] verified = ${hex.slice(0, 24)}…`;
-        }
-        return `encrypted — ${z.zoneCount} per-resolution zones, ` +
-            `grant ${grant == null || grant < 0 ? 'all levels' : '0..' + grant}${mac}`;
+        return `encrypted — ${z.zoneCount} per-resolution zones, integrity verified, ` +
+            `grant ${grant == null || grant < 0 ? 'all levels' : '0..' + grant}`;
     }
 
     // Progressively load every quality layer into dstCanvas.

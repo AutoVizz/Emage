@@ -156,7 +156,7 @@
            pinned on the right so it stays visible while scrolling. */
         .layout {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 700px;
+            grid-template-columns: minmax(0, 1fr) 460px;
             gap: 15px;
             align-items: start;
         }
@@ -195,14 +195,6 @@
             font-size: 10px;
         }
 
-        .keys-table td.k-mac {
-            color: #9f9;
-            word-break: break-all;
-            font-size: 10px;
-        }
-
-        /* Rows inside the current access grant: the keys a recipient of this
-           access level actually holds. */
         .keys-table tr.grant td {
             background: #1e3a2a;
         }
@@ -213,7 +205,7 @@
             padding: 10px 0;
         }
 
-        @media (max-width: 1500px) {
+        @media (max-width: 1200px) {
             .layout {
                 grid-template-columns: minmax(0, 1fr);
             }
@@ -277,17 +269,6 @@
         <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
     </div>
     <div class="row">
-        <span>AES IV (hex, 16 bytes):</span>
-        <input type="text" id="ivInput" size="42">
-        <button id="newIvBtn" type="button">New IV</button>
-    </div>
-    <p style="font-size:11px; margin:-2px 0 6px; color:#888;">
-        Generated randomly, afresh for every encode. It is not secret &mdash; it travels inside
-        the SEC marker so a reader can decrypt without being handed it &mdash; but it must not
-        repeat: reusing one IV under the same key gives two files an identical keystream, and
-        XORing them cancels it. Leave it alone unless you have a reason.
-    </p>
-    <div class="row">
         <span>J2K resolutions (DWT levels, max 100):</span>
         <input type="number" id="layerInput" value="6" min="1" max="100" style="width:70px">
     </div>
@@ -343,11 +324,10 @@
             One key per DWT resolution level, coarse-first. Level 0 is the coarsest
             approximation. Hand a recipient K0..K<em>a</em> and they can decode the
             image at that resolution and no finer — the levels above stay encrypted.
-            The MAC column carries the cumulative tag a holder of K0..Ki verifies:
-            recompute the chain up to level <em>i</em> and compare. It covers the
-            level's bytes and its position in the payload, so tampering or a
-            moved zone is rejected rather than decoded into a plausible image.
-            Keys and MACs are derived in the browser and never sent to the server.
+            Every level also carries a cumulative MAC, verified automatically on
+            every decode, so a tampered or moved zone is rejected rather than
+            decoded into a plausible-looking image. Keys are derived in the
+            browser and never sent to the server.
         </p>
         <table class="keys-table">
             <thead>
@@ -356,7 +336,6 @@
                 <th>Level</th>
                 <th>Resolves to</th>
                 <th>Material (hex)</th>
-                <th>MAC to level (SHA3-256, cumulative)</th>
             </tr>
             </thead>
             <tbody id="keysBody"></tbody>
@@ -395,26 +374,19 @@
     // the two ciphertexts cancels the keystream and yields the XOR of the
     // plaintexts -- a classic two-time pad. getRandomValues is the fix; a
     // fixed constant in this box is the bug.
-    function randomIvHex() {
+    let currentIv = null;
+
+    function newIv() {
         const iv = new Uint8Array(16);
         const webcrypto = globalThis.crypto;
         if (!webcrypto || !webcrypto.getRandomValues) {
-            status('crypto.getRandomValues unavailable: cannot generate a safe IV');
+            status('crypto.getRandomValues unavailable: cannot encrypt safely');
             return null;
         }
         webcrypto.getRandomValues(iv);
-        return Array.from(iv, (b) => b.toString(16).padStart(2, '0')).join('');
+        currentIv = iv;
+        return iv;
     }
-
-    function newIv() {
-        const hex = randomIvHex();
-        if (hex) $('ivInput').value = hex;
-        return hex;
-    }
-
-    $('newIvBtn').addEventListener('click', () => {
-        if (newIv()) status('new IV generated: ' + $('ivInput').value);
-    });
 
     // Push UI inputs into the library's mutable state.
     function syncConfig() {
@@ -425,7 +397,7 @@
         });
         emage.setCrypto({
             key: $('keyInput').value,
-            iv: $('ivInput').value,
+            iv: currentIv,
             accessLevel: $('accessInput').value.trim() === '' ? -1
                 : Number($('accessInput').value),
         });
@@ -437,7 +409,6 @@
     function syncSecInputs() {
         const on = $('secInput').checked;
         $('keyInput').disabled = !on;
-        $('ivInput').disabled = !on;
     }
 
     $('secInput').addEventListener('change', syncSecInputs);
@@ -538,13 +509,11 @@
 
         const tr = document.createElement('tr');
         if (i <= granted) tr.className = 'grant';
-        const mac = (macs && macs[i]) || '';
         const cells = [
             ['K' + i, ''],
             [i + ' / ' + total, ''],
             [(width ? w + 'x' + h : '?') + '  (r' + reduction + ')', ''],
             [k, 'k-hex'],
-            [mac, 'k-mac'],
         ];
         for (const [text, cls] of cells) {
             const td = document.createElement('td');
@@ -556,16 +525,15 @@
     });
 }
 
-async function onCopyKeys() {
-    if (!lastKeys) return;
-    const { keys, width, height, macs } = lastKeys;
+    async function onCopyKeys() {
+        if (!lastKeys) return;
+    const { keys, width, height } = lastKeys;
     const total = keys.length - 1;
     const text = keys.map((k, i) => {
         const reduction = total - i;
         const w = width ? Math.ceil(width / Math.pow(2, reduction)) : 0;
         const h = height ? Math.ceil(height / Math.pow(2, reduction)) : 0;
-        const mac = (macs && macs[i]) || '';
-        return `K${i}\tlevel ${i}/${total}\t${w}x${h}\treduction ${reduction}\t${k}\tmac=${mac}`;
+        return `K${i}\tlevel ${i}/${total}\t${w}x${h}\treduction ${reduction}\t${k}`;
     }).join('\n');
     try {
         await navigator.clipboard.writeText(text);
@@ -588,7 +556,7 @@ async function onCopyKeys() {
             const data = await emage.upload(emage.j2k);
             status(`uploaded ${data.stored}: ${data.width}x${data.height}, ` +
                 `layers=${data.layers}, bytes=${data.bytes}`);
-            showGranularKeys(data.granularKeys, data.width, data.height, data.macs);
+            showGranularKeys(data.granularKeys, data.width, data.height);
             loadGallery();
         } catch (err) {
             status('upload error: ' + fmtErr(err));
@@ -893,8 +861,7 @@ async function onCopyKeys() {
             // A new counter block per encode, so two images from this page never
             // share a keystream. Written into the SEC marker, so the reader does
             // not have to be given it.
-            const iv = $('secInput').checked ? newIv() : $('ivInput').value;
-            if ($('secInput').checked && !iv) return;
+            if ($('secInput').checked && !newIv()) return;
             syncConfig();
             emage.encodeCanvas(srcCanvas, {
                 numResolutions: parseInt($('layerInput').value, 10),
@@ -911,8 +878,7 @@ async function onCopyKeys() {
         // A fresh encoded stream is encodable/decodable → enable server actions.
         setJ2kDependent(true);
         status(`Encoded to J2K in ${(performance.now() - t0).toFixed(1)} ms ` +
-            `(${emage.j2k.length} bytes)` +
-            ($('secInput').checked ? ` — IV ${$('ivInput').value} (carried in the SEC marker)` : ''));
+            `(${emage.j2k.length} bytes)`);
         decodeToCanvas(emage.j2k, 'Decoded local J2K');
     }
 </script>
