@@ -208,9 +208,16 @@ export class Emage {
     // encrypted under its own key. Holding K0..Ka therefore reconstructs the
     // image at resolution level a and nothing finer; the levels above stay
     // encrypted. The chain is derived locally and is never sent to the server.
-    setCrypto(config = {}) {
-        if (config.key !== undefined) this.crypto.key = this._toBytes(config.key, 'key');
-        if (config.iv !== undefined) this.crypto.iv = this._toBytes(config.iv, 'iv');
+// null means "unset" for key and iv, mirroring how the encoder treats a null
+// iv as the unencrypted path. Coercing null through _toBytes would throw, which
+// turned a missing optional value into a hard failure for the caller.
+setCrypto(config = {}) {
+    if (config.key !== undefined) {
+        this.crypto.key = config.key === null ? null : this._toBytes(config.key, 'key');
+    }
+    if (config.iv !== undefined) {
+        this.crypto.iv = config.iv === null ? null : this._toBytes(config.iv, 'iv');
+    }
         // `levels` was the old cascade-round count and is no longer meaningful:
         // every level is now its own protected zone under its own derived key.
         const level = config.accessLevel ?? config.levels;
