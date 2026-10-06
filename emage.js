@@ -397,10 +397,17 @@ export class Emage {
     // decrypting it: `zoneCount` zones (one per DWT resolution level, coarse
     // first), each `starts[i]` bytes into the packet payload and `sizes[i]`
     // bytes long. `hasSec` is 0 for an unencrypted stream.
+    //
+    // Also returns the counter block carried in the marker (`iv`, 16 bytes) and
+    // the cumulative per-level MACs (`macs`, a flat zoneCount*32 array). A
+    // reader holding K0..Ka can recompute the chain up to level a and compare it
+    // against macs[a], which transitively authenticates every coarser level. The
+    // decoder does that automatically; these are for display and for a caller
+    // that wants to verify before decoding.
     describeSecurityZone(stream) {
         if (!this.decoder) throw new EmageError('Decoder module not initialized');
         if (!stream || !stream.length) {
-            return { hasSec: 0, zoneCount: 0, starts: [], sizes: [] };
+            return { hasSec: 0, zoneCount: 0, starts: [], sizes: [], macs: [], iv: null };
         }
         const dec = this.decoder;
         const ptr = dec._malloc(stream.length);
@@ -416,6 +423,8 @@ export class Emage {
                 // arrays. Array.from(null) throws.
                 starts: z.starts ? Array.from(z.starts) : [],
                 sizes: z.sizes ? Array.from(z.sizes) : [],
+                macs: z.macs ? Array.from(z.macs) : [],
+                iv: z.iv ? Array.from(z.iv) : null,
             };
         } finally {
             dec._free(ptr);
@@ -591,14 +600,23 @@ export class Emage {
         // stream has no zones to list, even when a master key is configured for
         // the rest of the session.
         out.granularKeys = null;
+        out.macs = null;
+        out.iv = null;
         if (this.crypto.key && this.crypto.key.length) {
-            let hasSec = false;
+            let zones = null;
             try {
-                hasSec = this.describeSecurityZone(data).hasSec === 1;
+                zones = this.describeSecurityZone(data);
             } catch (_) {
-                hasSec = false;
+                zones = null;
             }
-            if (hasSec) {
+            if (zones && zones.hasSec) {
+                out.iv = zones.iv ? bytesToHex(zones.iv) : null;
+                // One cumulative tag per level, as hex, aligned with the keys:
+                // macs[i] is what a holder of K0..Ki can verify.
+                out.macs = zones.macs.length === zones.zoneCount * 32
+                    ? Array.from({ length: zones.zoneCount }, (_, i) =>
+                        bytesToHex(zones.macs.slice(i * 32, i * 32 + 32)))
+                    : null;
                 try {
                     out.granularKeys = this.granularKeys(out.layers || out.numResolutions || null);
                 } catch (_) {

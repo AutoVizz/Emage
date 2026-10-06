@@ -156,7 +156,7 @@
            pinned on the right so it stays visible while scrolling. */
         .layout {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 460px;
+            grid-template-columns: minmax(0, 1fr) 700px;
             gap: 15px;
             align-items: start;
         }
@@ -189,6 +189,16 @@
 
         .keys-table td.k-hex {
             color: #9cf;
+            /* 64 hex chars per cell, two cells per row: let them wrap rather
+               than force the column wider. */
+            word-break: break-all;
+            font-size: 10px;
+        }
+
+        .keys-table td.k-mac {
+            color: #9f9;
+            word-break: break-all;
+            font-size: 10px;
         }
 
         /* Rows inside the current access grant: the keys a recipient of this
@@ -203,7 +213,7 @@
             padding: 10px 0;
         }
 
-        @media (max-width: 1200px) {
+        @media (max-width: 1500px) {
             .layout {
                 grid-template-columns: minmax(0, 1fr);
             }
@@ -326,7 +336,11 @@
             One key per DWT resolution level, coarse-first. Level 0 is the coarsest
             approximation. Hand a recipient K0..K<em>a</em> and they can decode the
             image at that resolution and no finer — the levels above stay encrypted.
-            These are derived in the browser and are never sent to the server.
+            The MAC column carries the cumulative tag a holder of K0..Ki verifies:
+            recompute the chain up to level <em>i</em> and compare. It covers the
+            level's bytes and its position in the payload, so tampering or a
+            moved zone is rejected rather than decoded into a plausible image.
+            Keys and MACs are derived in the browser and never sent to the server.
         </p>
         <table class="keys-table">
             <thead>
@@ -335,6 +349,7 @@
                 <th>Level</th>
                 <th>Resolves to</th>
                 <th>Material (hex)</th>
+                <th>MAC to level (SHA3-256, cumulative)</th>
             </tr>
             </thead>
             <tbody id="keysBody"></tbody>
@@ -489,11 +504,13 @@
 
         const tr = document.createElement('tr');
         if (i <= granted) tr.className = 'grant';
+        const mac = (macs && macs[i]) || '';
         const cells = [
             ['K' + i, ''],
             [i + ' / ' + total, ''],
             [(width ? w + 'x' + h : '?') + '  (r' + reduction + ')', ''],
             [k, 'k-hex'],
+            [mac, 'k-mac'],
         ];
         for (const [text, cls] of cells) {
             const td = document.createElement('td');
@@ -507,13 +524,14 @@
 
 async function onCopyKeys() {
     if (!lastKeys) return;
-    const { keys, width, height } = lastKeys;
+    const { keys, width, height, macs } = lastKeys;
     const total = keys.length - 1;
     const text = keys.map((k, i) => {
         const reduction = total - i;
         const w = width ? Math.ceil(width / Math.pow(2, reduction)) : 0;
         const h = height ? Math.ceil(height / Math.pow(2, reduction)) : 0;
-        return `K${i}\tlevel ${i}/${total}\t${w}x${h}\treduction ${reduction}\t${k}`;
+        const mac = (macs && macs[i]) || '';
+        return `K${i}\tlevel ${i}/${total}\t${w}x${h}\treduction ${reduction}\t${k}\tmac=${mac}`;
     }).join('\n');
     try {
         await navigator.clipboard.writeText(text);
@@ -536,7 +554,7 @@ async function onCopyKeys() {
             const data = await emage.upload(emage.j2k);
             status(`uploaded ${data.stored}: ${data.width}x${data.height}, ` +
                 `layers=${data.layers}, bytes=${data.bytes}`);
-            showGranularKeys(data.granularKeys, data.width, data.height);
+            showGranularKeys(data.granularKeys, data.width, data.height, data.macs);
             loadGallery();
         } catch (err) {
             status('upload error: ' + fmtErr(err));

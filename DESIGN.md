@@ -111,26 +111,36 @@ The split is a security boundary, not an organizational convenience:
 
 ## 3. The SEC marker format
 
-Emage uses the JPSEC security marker (**ISO/IEC 15444-8 / ITU-T T.807**, clause
-5.5), marker code `0xFF 0x65`, in its registry-based form.
-
-The segment is written into the **main header** and is always plaintext — the
-encryption covers only the packet payload after `SOD`.
+Emage uses the JPSEC security marker (**ISO/IEC 15444-8 / ITU-T T.807**),
+marker code `0xFF 0x65`, as a single tool block registered in the
+**user-defined** tool-id range. The segment is written into the **main
+header** and is always plaintext — the encryption covers only the packet
+payload after `SOD`.
 
 ### 3.1 Byte layout
 
-Offsets are relative to the marker code. One zone entry per resolution level,
-so the segment is variable length.
+Offsets are relative to the marker code. The segment is variable length: one
+zone entry and one MAC per resolution level.
 
-| Offset | Field | Value / meaning |
-|---|---|---|
-| 0..1 | marker | `FF 65` |
-| 2..3 | `Lsec` | segment length including itself: `7 + 10·E` |
-| 4 | `Form` | `0x02` — registry-based |
-| 5..6 | `T.sec` | `0x0002` — private AES-CTR tool |
-| 7 | `E` | number of protected zones (= number of resolution levels) |
-| 8 | `L` | length of zone info: `2 + 10·E` |
-| 9.. | zone entries | 10 bytes each |
+| Offset | Field | Width | Value / meaning |
+|---|---|---|---|
+| 0..1 | marker | | `FF 65` |
+| 2..3 | `Lsec` | 16 | segment length, **including itself**: `14 + LPID` |
+| 4..5 | `Zsec` | 16 | index of this SEC marker; `0` for the first |
+| 6..7 | `Psec` | 16 | bits 15–8 reserved (`0`), bit 7 = `FPSEC`, bits 6–0 = `Ntools` |
+| 8..11 | `ID` | 32 | tool id, `0x80000002` |
+| 12..13 | `LZOI` | 16 | length of the Zone of Influence; `0` — skipped |
+| 14..15 | `LPID` | 16 | length of the tool-specific parameters |
+| 16.. | `PID` | `LPID` | opaque to the SEC parser; our payload |
+
+`PID`, which is the only part with Emage-specific structure:
+
+| Offset | Field | Width | Meaning |
+|---|---|---|---|
+| +0..1 | `E` | 16 | number of protected zones (= resolution levels) |
+| +2..17 | `IV` | 16 | the counter block used for every level |
+| +18.. | zone entries | 10·E | see below |
+| +18+10E.. | MAC table | 32·E | cumulative SHA3-256 tag per level |
 
 Each 10-byte zone entry:
 
@@ -140,44 +150,75 @@ Each 10-byte zone entry:
 | +2..5 | `Z` | start offset, **relative to the first byte of the packet payload** (i.e. `SOD + 2`) |
 | +6..9 | `T` | size in bytes |
 
+So `LPID = 18 + 42·E` and `Lsec = 14 + LPID`. At the 64-level ceiling
+`Lsec` is 2720, comfortably inside 16 bits. Both length fields had to be
+16-bit: the previous one-byte `L` overflowed at 7 levels once MACs made each
+level cost 42 bytes.
+
 Implementation constants (`jpsec_aes.h`):
 
 ```
-JPSEC_SEC_FORM_OFFSET   4      JPSEC_ZONE_ENTRY_BYTES  10
-JPSEC_SEC_TSEC_OFFSET   5      JPSEC_MAX_ZONES         64
-JPSEC_SEC_E_OFFSET      7      JPSEC_AES_KEY_BYTES     32   (AES-256)
-JPSEC_SEC_L_OFFSET      8      JPSEC_AES_IV_BYTES      16
-JPSEC_SEC_ZONE_OFFSET   9      (first zone entry)
+JPSEC_SEC_ID_OFFSET      8      JPSEC_ZONE_ENTRY_BYTES  10
+JPSEC_SEC_LZOI_OFFSET   12      JPSEC_MAC_ENTRY_BYTES   32   (SHA3-256)
+JPSEC_SEC_LPID_OFFSET   14      JPSEC_MAX_ZONES         64
+JPSEC_SEC_PID_OFFSET    16      JPSEC_AES_KEY_BYTES     32   (AES-256)
+JPSEC_SEC_E_OFFSET      16      JPSEC_AES_IV_BYTES      16
+JPSEC_SEC_IV_OFFSET     18
+JPSEC_SEC_ZONE_OFFSET   34      JPSEC_TOOL_ID           0x80000002
+JPSEC_SEC_FIXED_BYTES   16      JPSEC_PSEC_FPSEC        0x0080
 ```
 
-### 3.2 Two design decisions worth calling out
+### 3.2 Four design decisions worth calling out
+
+**User-defined tool id.** `ID = 0x80000002` sits in `0x80000000..0xEFFFFFFF`,
+the user-defined range. Registered tools live in `0x00000000..0x7FFFFFFF`
+and are assigned by the JPSEC Registration Authority, so an id there would
+need registration and could collide with a normative tool.
+
+**`FPSEC` is set.** `Psec = 0x0081`. The flag asks a transcoding or rewriting
+process that does not understand the tool to forward the segment **as-is**.
+Clearing it would let such a process discard or alter the zone table and MACs
+— which is precisely what the serving layer must not do to a window it does
+not decrypt.
+
+**`LZOI = 0`.** The standard Zone of Influence is skipped and granularity is
+carried by our own table inside the opaque `PID`, which is permitted for a
+user-defined tool.
 
 **Payload-relative offsets.** `Z` is relative to `SOD+2`, not absolute in the
-file. This is deliberate. The serving layer rebuilds the main header and drops
-`TLM`/`PLM`/`PPM` (and `PLT`/`PPT` in tile-part headers), which shifts every
-absolute offset in the file. Payload-relative offsets survive that rebuild
-unchanged, so a window served by the server still carries a valid, correctly
-aligned zone table.
+file. This is deliberate and load-bearing. The serving layer rebuilds the main
+header and drops `TLM`/`PLM`/`PPM` (and `PLT`/`PPT` in tile-part headers),
+which shifts every absolute offset in the file. Payload-relative offsets
+survive that rebuild unchanged — and because the MACs cover `Z` and `T`, they
+survive it too. §11.1 records the end-to-end test that proves it.
 
-**No key material.** The marker never carries a key, IV, digest, or even an
-encryption flag. Its presence is the only signal, and the server ignores it
-entirely (§7.3).
+**The IV travels in the marker.** It is not secret, and publishing it means a
+reader can decrypt a served window without being handed the counter block out
+of band. The decoder treats the marker's IV as authoritative for that
+codestream; a caller-supplied IV is only used for a stream with no SEC marker,
+which by definition has no encryption to undo.
+
+**No key material.** The marker never carries a key. Its presence is the only
+signal, and the server ignores it entirely (§7.3).
 
 ### 3.3 Resolution ceiling
 
-One zone per level means the zone table is `10·E` bytes and `E` is a single
-byte, so the pyramid is capped at **64 resolution levels**. Both sides enforce
-this: the C encoder rejects `numResolutions` outside `1..64`, and `emage.js`
-checks the same bound up front with a clearer error message.
+Each level costs 42 bytes of header, so the pyramid is capped at **64
+resolution levels**. Both sides enforce this: the C encoder rejects
+`numResolutions` outside `1..64`, and `emage.js` checks the same bound up front
+with a clearer message.
 
 ### 3.4 Vendored OpenJPEG patches
 
 Two changes to vendored OpenJPEG are required:
 
 - `third_party/openjpeg/src/lib/openjp2/j2k.c` — `opj_j2k_write_sec()` rewritten
-  to emit the variable-length zone table. The zone count is published through
-  `jpsec_set_zone_count()`, because the SEC marker is written as a *header*
-  procedure, before any per-tile parameters exist.
+  to emit the single tool block with both tables. The zone count and IV are
+  published through `jpsec_set_zone_count()` / `jpsec_set_iv()`, because the SEC
+  marker is written as a *header* procedure, before any per-tile parameters
+  exist. The buffer is zeroed in full: `Z`, `T` and the MACs are patched
+  post-encode, and indeterminate stack content must not reach the codestream
+  even transiently.
 - `sec_marker.cc` — supplies the `j2k_read_sec` / `j2k_read_insec` handlers that
   the marker dispatcher expects when compiled with `USE_JPSEC`. These **validate
   and skip only**; they never act on the zone table. An encrypted codestream
@@ -196,12 +237,46 @@ server cannot slice windows.
 |---|---|
 | Block cipher | AES-256 (`JPSEC_AES_KEY_BYTES = 32`) |
 | Mode | CTR (NIST SP 800-38A); encryption and decryption are the same operation |
-| IV | 16 bytes, caller-supplied, shared across every level |
+| IV | 16 bytes, shared across every level, carried in the SEC marker |
 | Key derivation | `K(i+1) = SHA3-256(K(i))`, `K0 = master key` |
+| Integrity | cumulative SHA3-256 MAC chain, one tag per level |
 
 `jpsec_aes256_ctr_crypt()` and `jpsec_derive_level_keys()` are implemented over
 a **minimally trimmed Mbed TLS** — only `aes.c`, `sha3.c`, `platform_util.c` are
 compiled.
+
+### 4.1 The cumulative MAC chain
+
+Each level carries a tag, chained from the one below it so a reader holding
+`K0..Ka` can authenticate everything they can see:
+
+```
+MAC[-1] = 32 zero bytes
+MAC[r]  = SHA3-256( MAC[r-1] || K_r || r || Z_r || T_r || plaintext[r] )
+```
+
+Binding `K_r` in means a party without the key cannot forge the tag. Binding
+`Z` and `T` in means the tag also pins each zone's position and extent, so a
+**relocated or resized zone is rejected**, not just flipped bytes. Chaining
+means verifying level `a` transitively authenticates `0..a-1`.
+
+The decoder recomputes the chain over the plaintext of levels `0..accessLevel`
+after decrypting and compares it against the stored tags with a constant-time
+compare, before any truncation — so a tampered zone is rejected instead of
+being decoded into a plausible-looking image. AES-256-CTR on its own detects
+neither.
+
+Two consequences worth being explicit about:
+
+- A **coarser grant does not authenticate finer levels.** A holder of `K0..K0`
+  cannot detect corruption of level 1, because they lack `K1`. Their own
+  reconstruction is still fully verified.
+- The tags for *all* levels are plaintext in the header, so an attacker can
+  confirm a guess about a level above their grant. Infeasible in practice —
+  the key is unknown and a level's plaintext is a large structured body — but
+  it is a verification oracle, not a confidentiality leak.
+
+### 4.2 Verification
 
 AES-256 and SHA3-256 are used as published, without runtime verification. A
 build with a misconfigured `mbedtls_config.h` would produce silently wrong
@@ -247,7 +322,10 @@ Source: `encoder_bindings.cc`.
 5. **`jpsec_set_zone_count(numResolutions)`** — published before
    `opj_setup_encoder` so the header procedure can size the table.
 6. **Encode** to `/tmp/encode_out.j2k` in MEMFS, read back, delete.
-7. **`applyGranularSecurity()`** if `enableSec`.
+7. **`applyGranularSecurity()`** if `enableSec`. It locates `SOC → SEC → SOT →
+   PLT → SOD`, computes the per-level ranges from the packet table, then
+   computes the **MAC chain over the plaintext first**, encrypts, and patches
+   both tables. Order matters: the payload is plaintext only once.
 
 ### 5.3 Splitting the payload into zones
 
@@ -398,12 +476,27 @@ friends). Each component is sampled with its own stride and mapped onto the
 component-0 grid — a shared index would read past the end of every subsampled
 plane. Output is a `Uint8ClampedArray` ready for `ImageData`.
 
-### 6.8 `describeSecurityZone()`
+### 6.8 MAC verification
 
-Reports `{ hasSec, zoneCount, starts, sizes }` **without decrypting** — lets the
+`verifyAccessibleMacs()` recomputes the chain from §4.1 over the decrypted
+plaintext of levels `0..accessLevel` and compares it against the tags stored in
+the marker. It runs **before** truncation, so it checks exactly the bytes the
+caller is about to decode. Failure raises with the first failing level named:
+
+> `MAC verification failed at resolution level 3: the codestream has been modified`
+
+`describeSecurityZone()` also reports the chain and the IV without
+decrypting, so a UI can show what a grant verifies without decoding.
+
+### 6.9 `describeSecurityZone()`
+
+Reports `{ hasSec, zoneCount, starts, sizes, macs, iv }` **without
+decrypting** — lets the
 UI show which levels are already readable and which are still ciphertext.
 
-The native side leaves `starts`/`sizes` as `null` whenever the codestream has no
+`macs` is a flat `zoneCount * 32` array of bytes and `iv` is the 16-byte
+counter block. The native side leaves all of these as `null` whenever the
+codestream has no
 SEC marker, so the JS wrapper normalises them to `[]`. That case is *every
 plaintext codestream*, not just an empty buffer — an earlier version only
 guarded the empty stream and `Array.from(null)` threw on anything unencrypted.
@@ -634,12 +727,11 @@ starts at 0, offsets in the SEC zone table for levels `0..a` remain valid.
 attaches them to the response object:
 
 ```js
-if (this.crypto.key && this.crypto.key.length) {
-    out.granularKeys = this.granularKeys(out.layers || out.numResolutions || null);
-}
+out.granularKeys = this.granularKeys(out.layers || out.numResolutions || null);
 ```
 
-Nothing derived is transmitted. When no key is configured, or the stream has no
+All three are gated on the codestream actually carrying a SEC marker, so a
+plaintext upload reports none of them. Nothing derived is transmitted. When no key is configured, or the stream has no
 SEC marker, `granularKeys` is `null`.
 
 `upload()` also refuses any buffer not ending in `EOC` — a layer slice is not a
@@ -727,14 +819,15 @@ when cleared. `layerInput` (resolution count); **`accessInput`** (access level,
 refresh listing, open, delete. Upload / **Verify roundtrip** / delete on server.
 A sticky **derived-keys table** on the right (`keysPanel`/`keysBody`/
 `copyKeysBtn`) listing one row per level — key, level index, the resolution it
-resolves to, and the key material — with rows inside the current access grant
-highlighted.
+resolves to, the key material, and the cumulative **MAC** a holder of `K0..Ki`
+verifies — with rows inside the current access grant highlighted.
 
 ### `downloader.html` — progressive viewer
 Server URL/path; key/IV; `accessInput` for the grant. Breadcrumb file browser.
 Fetch meta; load full; load for a display size (`10vw` etc.). Canvas with stage
 label showing each progressive level. Every load reports the fetched stream's
-protection in the status line — plaintext, or the zone count and active grant.
+protection in the status line — plaintext, or the zone count, active grant, and
+the truncated MAC that grant verifies.
 
 ### `compare.html` — transfer strategy comparison
 Runs progressive vs one-shot vs full load side by side, three canvases with
@@ -805,6 +898,8 @@ fixes ownership to `$APP_UID`.
 | `test_granular.js` | EmageWasm | Pixel-exact access-level matrix |
 | `test_progressive.mjs` | EmageClient | Level selection, ordering, decode counting |
 | `test_granular_keys.mjs` | EmageClient | Public API: chain, clamping, window, keys |
+| `test_mac.js` | EmageWasm | Marker fields, MAC tampering, zone resizing |
+| `test_mac_server.mjs` | EmageClient | MAC survives a live-server window |
 | `test_chain.mjs` | EmageClient | 85 checks against the **live** server |
 
 Fixtures: `encrypted.j2k`, `sample.lrcp.j2k`, `sample.rlcp.j2k`,
@@ -816,6 +911,21 @@ reconstruct 16/32/64/128/256/512 px at reductions 5..0, and each grant's
 windowed decode must be **byte-identical to the corresponding full-stream
 decode**. That is what proves the SEC offsets, truncation, `Psot` patch and
 reduction clamp all agree.
+
+### 11.1 The server byte-arithmetic property
+
+The serving layer drops `TLM`/`PLM`/`PPM` and `PLT`/`PPT` and rebuilds `SOT`
+and `Psot` on every window, which shifts every absolute offset in the file.
+`test_mac_server.mjs` proves the cumulative chain still verifies through all
+six served windows of a 256×256/6-level image (554 B → 123812 B), because `Z`
+and `T` are payload-relative and the whole SEC segment is copied verbatim. It
+also uploads a **plaintext** control through the same path: the server reports
+the same layer count, serves no SEC marker, and the image decodes — one
+identical code path for both, with no encryption-awareness anywhere.
+
+`test_mac.js` covers the negative cases: a flipped byte in any zone, a flipped
+byte in the MAC table, and an altered zone `T` are each rejected, while
+corruption above a coarser grant is correctly *not* detected.
 
 `test_chain.mjs` is the integration net: everything the unit suites stub
 (emscripten encoder, HTTP upload, server marker parser, meta endpoint, stream
@@ -878,7 +988,10 @@ rejected by `GET /image`.
 - AES-256-CTR over the packet payload
 - SHA3-256 hash-chain key derivation, one key per resolution level
 - Per-level protected zones recorded in a JPSEC `SEC` marker
-- Public API to list the derived keys as hex
+- Cumulative SHA3-256 MAC per level, covering the level's bytes *and* its
+  position, verified on every decode with a constant-time compare
+- Counter block carried in the marker, so a served window needs no out-of-band IV
+- Public API to list the derived keys and MACs as hex
 
 **Access control**
 - `accessLevel` selects the finest reconstructible resolution

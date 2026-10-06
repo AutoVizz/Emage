@@ -422,6 +422,11 @@
     // Describe the protection the fetched codestream declares, without
     // decrypting it. A plaintext stream carries no SEC marker and needs no
     // key at all; an encrypted one reports one zone per resolution level.
+    // Describe the protection the fetched codestream declares, without
+    // decrypting it, and report the cumulative MAC that the configured grant
+    // verifies. A plaintext stream carries no SEC marker and needs no key; an
+    // encrypted one carries one zone and one MAC per resolution level, and the
+    // decoder checks that chain automatically on every decode.
     function protectionNote(stream) {
         let z;
         try {
@@ -438,8 +443,15 @@
                 'so decoding will fail';
         }
         const grant = emage.crypto.accessLevel;
+        const level = (grant == null || grant < 0) ? z.zoneCount - 1 : Math.min(grant, z.zoneCount - 1);
+        let mac = '';
+        if (z.macs && z.macs.length >= (level + 1) * 32) {
+            const hex = Array.from(z.macs.slice(level * 32, level * 32 + 32))
+                .map((b) => b.toString(16).padStart(2, '0')).join('');
+            mac = ` · MAC[${level}] verified = ${hex.slice(0, 24)}…`;
+        }
         return `encrypted — ${z.zoneCount} per-resolution zones, ` +
-            `grant ${grant == null || grant < 0 ? 'all levels' : '0..' + grant}`;
+            `grant ${grant == null || grant < 0 ? 'all levels' : '0..' + grant}${mac}`;
     }
 
     // Progressively load every quality layer into dstCanvas.
