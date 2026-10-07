@@ -49,12 +49,16 @@ const stream = await emage.encodePixelData(px, W, H, {
     numComponents: 3, numResolutions: RES, numLayers: 1, enableSec: true,
 });
 const up = await emage.upload(stream);
+check(Object.keys(up.metadata?.keyMap?.levels || {}).length === RES,
+    'server returns the complete opaque lookup map from the image header');
 log(`uploaded ${up.stored} ${up.width}x${up.height} layers=${up.layers} bytes=${up.bytes}`);
 check(up.layers === RES, `server parsed layers=${up.layers}`);
 
+const keys = emage.granularKeys(RES);
+
 // ---- preview at every access level -------------------------------------
 for (let a = 0; a < RES; ++a) {
-    emage.setCrypto({ key: KEY, iv: IV, accessLevel: a });
+    emage.setCrypto({ key: keys[a], iv: IV, accessLevel: a });
     let out;
     try {
         out = await emage.preview({ thumbSize: 64 });
@@ -71,6 +75,24 @@ for (let a = 0; a < RES; ++a) {
 }
 
 // ---- preview with no IV configured, as the downloader does now ---------
+for (let a = 0; a < RES; ++a) {
+    emage.setCrypto({ key: keys[a], accessLevel: -1 });
+    const realFetch = globalThis.fetch;
+    const requests = [];
+    let out;
+    globalThis.fetch = (url, init) => {
+        requests.push(init?.headers?.['X-Emage-Layers']);
+        return realFetch(url, init);
+    };
+    try { out = await emage.playAll(); } finally { globalThis.fetch = realFetch; }
+    check(requests.join(',') === `meta,0:${a}`,
+        `automatic K${a} load uses metadata and exactly one bounded packet request`);
+    check(out.decoded.keyLevel === a && out.decoded.width === Math.ceil(W / 2 ** (RES - 1 - a)),
+        `automatic server load with K${a} finds its correct resolution without an access level`);
+    check(out.steps.length === a + 1,
+        `automatic server load with K${a} emits only its accessible resolution steps`);
+}
+
 const reader = await Emage.init({
     encoder: () => require(WASM + '/EmageWasmEncoder.js')({
         locateFile: () => dataUrl('EmageWasmEncoder.wasm') }),
@@ -93,7 +115,7 @@ try {
 }
 
 // ---- display()/playAll(), the other two viewer entry points -------------
-reader.setCrypto({ key: KEY, accessLevel: 2 });
+reader.setCrypto({ key: keys[2], accessLevel: 2 });
 try {
     const out = await reader.display('64', { thumbSize: 64 });
     check(out.decoded.width > 0,

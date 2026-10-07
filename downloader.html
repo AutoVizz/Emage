@@ -162,15 +162,13 @@
         <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
     </div>
     <div class="row">
-        <span>Access level (highest readable level, 0 = coarsest; blank = all):</span>
-        <input type="number" id="accessInput" placeholder="all" min="0" style="width:70px">
+        <span>Resolution limit (optional, 0 = coarsest; blank = automatic):</span>
+        <input type="number" id="accessInput" placeholder="auto" min="0" style="width:70px">
     </div>
     <p style="margin:6px 0 0; color:#9a9; font-size:12px;">
-        The master key derives one key per DWT resolution level
-        (K0 = key, K1 = SHA3-256(K0), ...). This is the highest level you hold:
-        with K0..K<em>a</em> the client requests only levels 0..a from the server and
-        decodes no finer than that. A finer request is clamped rather than
-        satisfied with an approximate image.
+        Enter any granted key and leave the resolution limit blank. Its level
+        is detected automatically and the image loads at the finest resolution
+        that key unlocks. Set a limit only when you want a coarser image.
     </p>
 </div>
 
@@ -422,7 +420,7 @@
     // verifies. A plaintext stream carries no SEC marker and needs no key; an
     // encrypted one carries one zone and one MAC per resolution level, and the
     // decoder checks that chain automatically on every decode.
-    function protectionNote(stream) {
+    function protectionNote(stream, decoded) {
         let z;
         try {
             z = emage.describeSecurityZone(stream);
@@ -437,9 +435,10 @@
             return `encrypted — ${z.zoneCount} per-resolution zones, but no key set, ` +
                 'so decoding will fail';
         }
-        const grant = emage.crypto.accessLevel;
+        const grant = decoded ? decoded.numResolutions - 1 - decoded.reduction
+            : emage.crypto.accessLevel;
         return `encrypted — ${z.zoneCount} per-resolution zones, integrity verified, ` +
-            `grant ${grant == null || grant < 0 ? 'all levels' : '0..' + grant}`;
+            `grant ${grant == null || grant < 0 ? 'automatic' : '0..' + grant}`;
     }
 
     // Progressively load every quality layer into dstCanvas.
@@ -447,8 +446,8 @@
         try {
             syncConfig();
             const out = await emage.playAll({ canvas: dstCanvas, onLayer });
-            status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers ` +
-                `(${out.stream.length} bytes) — ${protectionNote(out.stream)}`);
+            status(`Loaded ${out.decoded.width}x${out.decoded.height}, ${out.steps.length} resolution steps ` +
+                `(${out.stream.length} bytes) — ${protectionNote(out.stream, out.decoded)}`);
         } catch (err) {
             status('load-full error: ' + fmtErr(err));
         }
@@ -460,9 +459,9 @@
         try {
             syncConfig();
             const out = await emage.display($('sizeInput').value, { canvas: dstCanvas, onLayer });
-            status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers — ` +
+            status(`Loaded ${out.decoded.width}x${out.decoded.height}, ${out.steps.length} resolution steps — ` +
                 `rendered ${out.displaySize.width}x${out.displaySize.height} ` +
-                `(${out.stream.length} bytes) — ${protectionNote(out.stream)}`);
+                `(${out.stream.length} bytes) — ${protectionNote(out.stream, out.decoded)}`);
         } catch (err) {
             status('size load error: ' + fmtErr(err));
         }

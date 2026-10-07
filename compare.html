@@ -203,9 +203,9 @@
             <tbody></tbody>
         </table>
         <p class="sub" style="margin: 8px 0 0;">
-            All three columns fetch the same codestream in the same single request: resolution levels are
-            spatially nested, not bandwidth-separable, so a reduced-resolution decode still needs every byte.
-            They differ only in which DWT levels the decoder is asked for. Decoding level <i>r</i> means
+            A and B fetch only the resolution packets needed for the target size, capped by the key's
+            access. C fetches through the finest resolution that key unlocks. Smaller targets save both
+            bandwidth and decoding work. Decoding level <i>r</i> means
             ceil(W&nbsp;/&nbsp;2<sup>NL-r</sup>) square, so the decoder never MQ-decodes the code blocks above
             <i>r</i> and never runs the high-pass synthesis path on them. A walks from two levels coarser than
             the target down to it, so its intermediate frames are a quarter the samples of the next one and
@@ -320,8 +320,8 @@
         const sizeTarget = $('sizeInput').value.trim();
         const sizeLimited = !(sizeTarget === '' || sizeTarget === 'all' || sizeTarget === '100%');
 
-        // Every column is one fetch of the same codestream; they differ only in
-        // the DWT resolution level the decoder is asked to stop at. Each pass is
+        // Each column selects its packet window for its requested resolution.
+        // Each pass is
         // timed from its own start and runs strictly after the previous one, so
         // no column shares bandwidth or main-thread time with another.
         const runPass = async (canvas, tv, label, target, opts) => {
@@ -372,7 +372,7 @@
 
         // ---- metrics -------------------------------------------------------
         const pixels = r => r.res.steps.reduce((s, x) => s + x.pixels, 0);
-        const bytes = r => r.res.stream.length;
+        const bytes = r => r.res.transferredBytes;
         const dims = r => `${r.res.decoded.width}×${r.res.decoded.height}`;
         const ms = v => v.toFixed(1) + ' ms';
         const aFirst = stepMs.length ? stepMs[0] : null;
@@ -386,8 +386,9 @@
         appendRow('sample pixels decoded', fmtBytes(pixels(a)), fmtBytes(pixels(b)), fmtBytes(pixels(c)),
             true, 'cumulative across the column\'s steps');
         appendRow('bytes transferred', fmtBytes(bytes(a)), fmtBytes(bytes(b)), fmtBytes(bytes(c)),
-            true, 'identical: levels are nested, not separable');
-        appendRow('HTTP requests', 1, 1, 1, true, 'one full codestream each');
+            true, 'image bytes only; smaller targets use smaller windows');
+        appendRow('HTTP requests', a.res.httpRequests, b.res.httpRequests, c.res.httpRequests,
+            true, 'metadata plus the required packet window');
         appendRow('time to first frame', aFirst == null ? '—' : ms(aFirst), '—', '—', true,
             'only A shows intermediate frames');
         appendRow('total time', ms(a.ms), ms(b.ms), ms(c.ms), true,

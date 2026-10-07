@@ -44,6 +44,8 @@ log(`encoded ${stream.length} bytes, ${RES} levels`);
 const local = emage.describeSecurityZone(stream);
 check(local.hasSec === 1, `local SEC marker present, ${local.zoneCount} zones`);
 
+const keys = emage.granularKeys(RES);
+
 let uploaded = false;
 try {
     const up = await emage.upload(stream);
@@ -64,7 +66,7 @@ if (uploaded) {
     // rewrite -- which it can only do because Z is payload-relative and the SEC
     // segment itself is copied verbatim.
     for (let a = 0; a < RES; ++a) {
-        emage.setCrypto({ key: KEY, iv: IV, accessLevel: a });
+        emage.setCrypto({ key: keys[a], iv: IV, accessLevel: a });
         let framed;
         try {
             framed = await emage._stream();

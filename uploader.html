@@ -322,7 +322,8 @@
         <h3>Granular progressive keys</h3>
         <p style="margin:0 0 8px; color:#9a9; font-size:12px;">
             One key per DWT resolution level, coarse-first. Level 0 is the coarsest
-            approximation. Hand a recipient K0..K<em>a</em> and they can decode the
+            approximation. The master key is the finest key; K(m−1) = SHA3-256(Km).
+            Hand a recipient K<em>a</em> and they derive the coarser keys to decode the
             image at that resolution and no finer — the levels above stay encrypted.
             Every level also carries a cumulative MAC, verified automatically on
             every decode, so a tampered or moved zone is rejected rather than
@@ -341,8 +342,9 @@
             <tbody id="keysBody"></tbody>
         </table>
         <div class="keys-empty" id="keysEmpty">
-            No keys yet. Encode an image, then <strong>Upload current J2K</strong> to derive
-            the chain. Highlighted rows are the keys your current access level holds.
+            No keys yet. Encode an image with encryption enabled to show the
+            full chain immediately. Highlighted rows are the keys your current
+            access level holds; all intermediate keys remain visible.
         </div>
         <div class="row" style="margin-top:8px;">
             <button id="copyKeysBtn" disabled>Copy all keys</button>
@@ -417,7 +419,7 @@
         for (const id of ['downloadBtn', 'decodeBtn', 'upBtn', 'verifyBtn']) {
             $(id).disabled = !enabled;
         }
-        // The listed keys describe one specific uploaded stream. Reaching this with
+        // The listed keys describe one specific encoded stream. Reaching this with
         // a freshly encoded or freshly loaded stream means those keys no longer
         // belong to what is on screen, so clear them rather than leave a stale
         // chain next to a different image.
@@ -459,10 +461,18 @@
     }
 
     // Decode a codestream into dstCanvas using the library's key/IV.
+    // This page holds the master; derive Ka for a restricted preview.
+    function ownerDecodeOptions(count) {
+        const grant = emage.crypto.accessLevel;
+        if (grant == null || grant < 0 || !count || grant >= count - 1) return {};
+        return { key: emage.granularKeys(count)[grant] };
+    }
+
     function decodeToCanvas(stream, label) {
         const t0 = performance.now();
         try {
-            const result = emage.decode(stream);
+            const zones = emage.describeSecurityZone(stream);
+            const result = emage.decode(stream, ownerDecodeOptions(zones.zoneCount));
             paint(result, label);
             status(`${label}: ${result.width}x${result.height} in ` +
                 `${(performance.now() - t0).toFixed(1)} ms`);
@@ -474,7 +484,7 @@
     }
 
     // ---------------------------------------------------------------------
-    // Render the per-resolution keys the upload exposed as a table. Cells are
+    // Render all per-resolution keys after encoding or upload. Cells are
     // built as text nodes so the values are selectable and copyable without any
     // HTML interpretation. lastKeys mirrors the rendered state so the copy
     // button serializes the data rather than scraping the DOM.
@@ -501,7 +511,7 @@
     const granted = (grant == null || grant < 0) ? total : Math.min(grant, total);
 
     keys.forEach((k, i) => {
-        // Holding K0..Ki reconstructs the image at resolution level i,
+        // Holding Ki derives K0..Ki and reconstructs resolution level i,
         // which is reduction total - i.
         const reduction = total - i;
         const w = width ? Math.ceil(width / Math.pow(2, reduction)) : 0;
@@ -584,8 +594,10 @@
             syncConfig();
             status('verifying: uploading and re-downloading...');
             await emage.upload(emage.j2k);
-            const local = emage.decode(emage.j2k);
-            const out = await emage.playAll();
+            const zones = emage.describeSecurityZone(emage.j2k);
+            const options = ownerDecodeOptions(zones.zoneCount);
+            const local = emage.decode(emage.j2k, options);
+            const out = await emage.playAll(options);
             const server = out.decoded;
             if (local.width !== server.width || local.height !== server.height) {
                 status(`verify: DIMENSION MISMATCH (${local.width}x${local.height} vs ` +
@@ -700,7 +712,8 @@
             emage.server.imagePath = path;
             $('imgPath').value = path;
             status(`Loading ${path}…`);
-            const out = await emage.playAll({ canvas: dstCanvas });
+            const meta = await emage.meta();
+            const out = await emage.playAll({ ...ownerDecodeOptions(meta.layers), canvas: dstCanvas });
             $('stageLabel').textContent = `Server: ${path}`;
             status(`Loaded ${out.loadedLayers}/${out.totalLayers} layers ` +
                 `(${out.stream.length} bytes)`);
@@ -761,7 +774,7 @@
         const box = card.querySelector('.thumbbox');
         try {
             emage.server.imagePath = img.path;
-            const out = await emage.preview();
+            const out = await emage.preview(ownerDecodeOptions(img.layers));
             const d = out.decoded;
             if (!d) throw new EmageError('no decoded output');
             const scale = Math.min(160 / d.width, 104 / d.height);
@@ -877,6 +890,10 @@
 
         // A fresh encoded stream is encodable/decodable → enable server actions.
         setJ2kDependent(true);
+        const zones = emage.describeSecurityZone(emage.j2k);
+        if (zones.hasSec) {
+            showGranularKeys(emage.granularKeys(zones.zoneCount), width, height);
+        }
         status(`Encoded to J2K in ${(performance.now() - t0).toFixed(1)} ms ` +
             `(${emage.j2k.length} bytes)`);
         decodeToCanvas(emage.j2k, 'Decoded local J2K');

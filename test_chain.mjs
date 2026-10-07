@@ -166,8 +166,8 @@ const target = 400;
     check(c.displaySize.width === W, 'C decoded at full resolution');
     check(c.loadMode === 'full', 'C reports loadMode=full');
 
-    check(a.stream.length === b.stream.length && b.stream.length === c.stream.length,
-        'all three passes transfer the same bytes (levels are nested)');
+    check(a.stream.length === b.stream.length && b.stream.length < c.stream.length,
+        'target-sized passes transfer the same reduced window, smaller than the full image');
     check(a.numResolutions === b.numResolutions && b.numResolutions === c.numResolutions,
         'all three passes agree on the resolution count');
 }

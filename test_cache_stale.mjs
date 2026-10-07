@@ -29,10 +29,12 @@ const solid = new Uint8Array(64 * 64 * 3).fill(200);
 const grad = new Uint8Array(128 * 128 * 3);
 for (let i = 0; i < grad.length; ++i) grad[i] = (i * 7) & 0xff;
 
-const enc1 = await emage.encodePixelData(solid, 64, 64, {
+const bytes1 = await emage.encodePixelData(solid, 64, 64, {
     numComponents: 3, numResolutions: 4, numLayers: 1, enableSec: false });
-const enc2 = await emage.encodePixelData(grad, 128, 128, {
+const bytes2 = await emage.encodePixelData(grad, 128, 128, {
     numComponents: 3, numResolutions: 4, numLayers: 1, enableSec: false });
+const enc1 = Emage.withMetadata(bytes1, { generation: 1 });
+const enc2 = Emage.withMetadata(bytes2, { generation: 2 });
 
 const up1 = await emage.upload(enc1);
 console.log(`        upload #1 -> ${up1.width}x${up1.height} bytes=${up1.bytes}`);
@@ -57,12 +59,19 @@ console.log(`        decoded  -> ${d2.width}x${d2.height}`);
 console.log('');
 const staleMeta = !(m2.width === 128 && m2.height === 128);
 const staleBytes = s2.length === s1.length;
-console.log(staleMeta || staleBytes
+const staleHeader = m1.metadata?.generation !== 1 || m2.metadata?.generation !== 2;
+console.log(staleMeta || staleBytes || staleHeader
     ? 'RESULT: STALE — the server is still serving the first upload'
     : 'RESULT: FRESH — the cache is correctly invalidated on upload');
 
 if (staleMeta) console.log(`        meta still reports ${m2.width}x${m2.height}, expected 128x128`);
 if (staleBytes) console.log(`        fetch still returns ${s2.length} bytes, same as before the re-upload`);
+if (staleHeader) console.log('        generic header metadata was not refreshed');
 console.log(`        stored on disk: ${(await (await fetch(`${base}/image/${PATH}`, {headers:{'X-Emage-Layers':'meta'}})).text()).slice(0,120)}`);
 
+await emage.upload(bytes2);
+const cleared = (await emage.meta()).metadata == null;
+console.log(cleared ? 'PASS metadata is absent after replacement with an image lacking the COM envelope'
+    : 'FAIL old header metadata survived replacement');
 await emage.remove();
+process.exitCode = staleMeta || staleBytes || staleHeader || !cleared ? 1 : 0;

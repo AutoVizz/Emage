@@ -22,19 +22,19 @@ consulted.
 That makes resolution levels a natural unit of *cryptographic access control*:
 
 ```
-K0 = master key
-K1 = SHA3-256(K0)
-K2 = SHA3-256(K1)
+K(E-1) = master key
+K(m-1) = SHA3-256(Km)
 ...
+K0 = SHA3-256(K1)
 ```
 
 Each level's packet payload is encrypted exactly once, under its own key from
 that chain. Because the chain is a one-way function of the master key, and each
-key unlocks exactly one level, **the number of keys a party holds is precisely
-the finest resolution that party can see.** Access control is cryptographic, not
+key unlocks exactly one level, **a party holding Ka derives all coarser keys,
+but cannot derive any finer key.** Access control is cryptographic, not
 a server-side permission check.
 
-The security model is therefore *graceful*: give someone keys `K0..Ka` and they
+The security model is therefore *graceful*: give someone key `Ka` and they
 get a legitimately decodable small image. You never hand out a "thumbnail" that
 is merely hidden — you hand out a smaller, real image.
 
@@ -239,6 +239,56 @@ server cannot slice windows.
 
 ---
 
+### 3.5 Opaque metadata in the image header
+
+Caller metadata is stored inside the image, never in a separate file or an HTTP
+upload header. It uses a binary JPEG 2000 COM marker in the main header, before
+SOT. SEC continues to carry the IV, zones and cumulative MACs unchanged.
+
+| Field | Bytes | Value |
+|---|---|---|
+| Marker | 2 | `FF 64` |
+| Lcom | 2 | big-endian length including Lcom, Rcom and payload |
+| Rcom | 2 | `0`, binary comment |
+| Envelope prefix | 11 | ASCII `EMAGE-META` followed by one NUL byte |
+| Metadata | variable | UTF-8 JSON object |
+
+The payload fits one COM segment (`Lcom <= 65535`). Other comments remain
+untouched. Replacing metadata removes the previous envelope and preserves SIZ,
+COD, SEC, packet data and payload-relative zone offsets. The same envelope can
+carry arbitrary metadata on a plaintext image.
+
+Encrypted client encodes add this client-defined lookup object:
+
+```json
+{
+  "keyMap": {
+    "iv": "<16-byte IV as 32 lowercase hex digits>",
+    "levels": {
+      "<SHA3-256(IV || K0), 64 hex digits>": 0,
+      "<SHA3-256(IV || K1), 64 hex digits>": 1
+    }
+  }
+}
+```
+
+There is one entry per resolution. SHA3 hashes the concatenated **raw bytes**,
+IV first and key second, rather than their hex strings. These tags reveal no raw
+key material. The random per-image IV also prevents the same key from producing
+the same tag across different encodes.
+
+The server recognizes only the generic COM envelope and returns its JSON as
+`metadata` on upload and `X-Emage-Layers: meta`. It never interprets `keyMap`,
+IVs, SEC or encryption state. Resolution windows preserve the COM marker.
+A client hashes its supplied key locally, selects the matching level, and then
+fetches the needed packet window. An unmatched key needs no image download.
+
+Lookup metadata selects a download; it is not an authenticity guarantee. The
+native decoder still checks MACs and authenticates the supplied key's level.
+The client rejects a map entry that disagrees with that authenticated level.
+Modified requested zones cannot cause a silent fallback to a coarser image.
+Files lacking a map use the coarsest-zone discovery described in §8.3.
+
 ## 4. Cryptography
 
 | Property | Choice |
@@ -246,7 +296,7 @@ server cannot slice windows.
 | Block cipher | AES-256 (`JPSEC_AES_KEY_BYTES = 32`) |
 | Mode | CTR (NIST SP 800-38A); encryption and decryption are the same operation |
 | IV | 16 bytes, **random per file**, shared across every level, carried in the SEC marker |
-| Key derivation | `K(i+1) = SHA3-256(K(i))`, `K0 = master key` |
+| Key derivation | `K(m-1) = SHA3-256(Km)`, `K(E-1) = master key` |
 | Integrity | cumulative SHA3-256 MAC chain, one tag per level |
 
 `jpsec_aes256_ctr_crypt()` and `jpsec_derive_level_keys()` are implemented over
@@ -286,10 +336,15 @@ Two consequences worth being explicit about:
 
 ### 4.2 What a reader needs
 
-Only the master key and the codestream. The IV comes from the marker, and a
-caller-supplied IV is length-checked but then superseded. The access level
-selects which keys are held; the cumulative MAC (§4.1) is verified
-automatically over exactly the levels those keys reconstruct.
+Only a granted key Ka and the codestream or its server path. There is no need to
+enter the key's resolution or its IV. With server metadata available, the client
+finds a locally computed `SHA3-256(IV || Ka)` tag in the image's header map
+before fetching image packets. The decoder independently authenticates a by
+hashing toward K0 and checking MAC[0] against the coarsest zone.
+
+Full access uses K(E-1), the master. An optional `accessLevel` limits the
+requested resolution further; `all` / `-1` selects the key's level automatically.
+The IV comes from SEC, and a supplied IV is length-checked then superseded.
 
 ### 4.3 Verification
 
@@ -370,7 +425,7 @@ throws rather than silently mis-encrypting.
 5. `jpsec_patch_sec_zones()` overwrites the reserved zone table.
 
 `deriveGranularKeys(key, count)` is exposed as a separate binding returning the
-chain as lowercase hex strings, `K0` first. This is what the client uses to
+chain as lowercase hex strings, `K0` first, with the supplied key at `count-1`. This is what the client uses to
 *display and distribute* keys after upload.
 
 ---
@@ -382,11 +437,15 @@ Source: `decoder_bindings.cc`.
 ```cpp
 DecodeResult decodeRaw(uintptr_t ptr, size_t size,
                        val key, val iv,
-                       int accessLevel,   // -1 = every level
+                       int accessLevel,   // -1 = detect the supplied key's level
                        int reduction);    // DWT halvings; 0 = full resolution
 ```
 
-Returns `{ width, height, numComponents, reduction, numResolutions, rgbaPixels }`.
+Returns `{ width, height, numComponents, reduction, numResolutions, keyLevel, rgbaPixels }`.
+`keyLevel` is authenticated for encrypted streams and `-1` for plaintext.
+`identifyKeyLevel(ptr, size, key)` needs only the main header and the complete
+coarsest zone; it performs no image decode. `keyLookupTag(key, iv)` is exported
+by both WASM modules and returns `SHA3-256(IV || key)` as lowercase hex.
 
 ### 6.1 Polymorphic crypto
 
@@ -421,8 +480,15 @@ be tolerated in the *header* while being refused at the point of use (§6.3,
 
 `decryptAccessibleLevels()`:
 
-1. Clamp `accessLevel` to the levels actually present (`-1` → last level).
-2. Derive `K0..K_accessLevel`.
+Before decryption, `detectKeyLevel()` hashes the supplied key toward K0
+and verifies MAC[0] on a scratch copy of the coarsest zone. A match identifies
+the supplied key as Ka. Wrong keys, damaged coarsest data, and old-format
+ciphertext are rejected. The complete requested MAC chain is still verified;
+finer corruption never triggers a fallback to a lower grant.
+
+1. Use the detected level a, capped by an explicit `accessLevel` if supplied.
+   `all` / `-1` means use a automatically.
+2. Derive the effective grant key and all coarser keys backwards from Ka.
 3. AES-256-CTR each zone `0..accessLevel` in place. Each zone's declared size is
    clamped to `payload - Z`; a zone beginning past the payload is treated as
    empty rather than trusted.
@@ -548,7 +614,7 @@ or vice versa.
 
 | Value | Result |
 |---|---|
-| `meta` | JSON `{ layers, width, height, bytes }` |
+| `meta` | JSON `{ layers, width, height, bytes, metadata }`; metadata comes from COM |
 | `all` (or absent) | headers + all packets, EOC-terminated — self-contained |
 | `n` | single layer `n` |
 | `n:m` | layers `n..m` inclusive |
@@ -577,15 +643,17 @@ invisible to cross-origin browser JS, and these are all read by the client.
 
 ### 7.3 The server is key-blind
 
-This is a **contract, not an accident** (`openapi.yaml` §description):
-
-> No header, query, or body field carries keys, IVs, or an encryption flag; the
-> server must not be extended to require or accept one.
-
-The server never learns whether a file is encrypted. `J2kCodestreamParser` treats
-`FF 65` like any other marker; the payload after `SOD` is opaque bytes it copies.
-`/image-info` reports structural facts (dimensions, progression, packet counts)
+The same endpoints store and slice plaintext and encrypted codestreams. The
+server never requires keys or an encryption flag, and never decides whether an
+image is encrypted. `J2kCodestreamParser` handles SEC like any other marker;
+packet bytes after SOD remain opaque. `/image-info` reports structural facts
 that hold equally for plaintext and ciphertext.
+
+`J2kMetadata.Read()` recognizes the generic binary COM envelope (§3.5) and
+returns a cloned JSON object, or null when absent or malformed. It does not
+interpret the object's fields. `IndexedImage` caches that metadata together with
+the image bytes and marker parse. Upload invalidates this cache, so re-uploading
+cannot leave a stale lookup map. There are no sidecar files.
 
 ### 7.4 `J2kCodestreamParser`
 
@@ -690,19 +758,20 @@ subclass `Error`.
 ### 8.1 Configuration
 
 ```js
-await Emage.init({ wasmBase?, encoder?, decoder?, encoderUrl?, decoderUrl? })
-  .setServer({ baseUrl, imagePath, password })
-  .setCrypto({ key, iv, accessLevel });
+const emage = await Emage.init({ wasmBase: './cmake-build-wasm/' });
+emage.setServer({ baseUrl: 'http://localhost:3233', imagePath: 'example.j2k' });
+emage.setCrypto({ key: grantedKey }); // automatic resolution; IV comes from SEC
+const image = await emage.playAll();
 ```
 
-`init()` resolves the Emscripten modules from (in order) an explicit factory,
-`globalThis.J2KEncoder` / `globalThis.J2KDecoder`, or by injecting a `<script>`
-tag. `wasmBase` defaults to `cmake-build-wasm/` resolved relative to
+`init()` resolves modules from an explicit factory, a module global, or an
+injected script. `wasmBase` defaults to `cmake-build-wasm/` relative to
 `import.meta.url`.
 
-`accessLevel` accepts an integer or `"all"` / `-1`. The legacy `levels` alias is
-accepted and ignored-with-meaning (it was the old cascade-round count and no
-longer maps to anything). Key must be exactly 32 bytes, IV exactly 16.
+`accessLevel` accepts a non-negative integer ceiling or `all` / `-1` for
+automatic detection. The legacy `levels` alias maps to that same ceiling.
+Keys are 32 bytes. IVs are 16 bytes when supplied; readers do not need one.
+Encoding uses the finest/master key, while decoding accepts any granted key.
 
 ### 8.2 API surface
 
@@ -712,8 +781,11 @@ longer maps to anything). Key must be exactly 32 bytes, IV exactly 16.
 | `encodeCanvas(canvas, opts)` | Encode from a canvas |
 | `decode(stream, opts)` | Decrypt + decode → `{width,height,rgbaPixels,…}` |
 | `decodeToCanvas` / `paintTo` | Decode and paint, optionally scaled into `dims` |
-| `describeSecurityZone(stream)` | `{hasSec,zoneCount,starts,sizes}`, no decryption |
-| `granularKeys(count?)` | Chain as hex strings |
+| `describeSecurityZone(stream)` | `{hasSec,zoneCount,starts,sizes,macs,iv}`, no decryption |
+| `granularKeys(count?)` | Coarse-first hex chain, supplied key at count−1 |
+| `keyLookupTag(key, iv)` | SHA3-256(IV || key), locally computed |
+| `Emage.readMetadata(stream)` | Generic JSON from the binary COM envelope |
+| `Emage.withMetadata(stream, object)` | Insert/replace the generic COM envelope |
 | `meta()` | `GET` with `X-Emage-Layers: meta` |
 | `list()` | `GET /images` |
 | `upload(j2k, opts)` | `POST`, enriched client-side with `granularKeys` |
@@ -725,79 +797,65 @@ longer maps to anything). Key must be exactly 32 bytes, IV exactly 16.
 `resolveTarget()` accepts `200`, `'100px'`, `'10vw'`, `'30vh'`, `'50%'`,
 `'all'`, `'100%'`.
 
-### 8.3 Key-blindness in the client
+### 8.3 Metadata lookup and bounded downloads
 
-`_stream()` is the only fetch of codestream bytes. It requests **only what the
-grant can read**:
+For a new encrypted image, `display()`, `preview()` and `playAll()`:
 
-```js
-const grant = this.crypto.accessLevel;
-const spec = (grant == null || grant < 0) ? 'all' : '0:' + grant;
-```
+1. Fetch `X-Emage-Layers: meta` once. No image packets are included.
+2. Compute `SHA3-256(IV || supplied key)` locally and find its level a in
+   `metadata.keyMap.levels`. An unmatched key stops here.
+3. Compute the needed level b from the requested reduction r: `E−1−r`,
+   clamped to 0, the key's level a, and any explicit `accessLevel` ceiling.
+4. Fetch exactly `X-Emage-Layers: 0:b`, including headers and EOC.
+5. Authenticate the key level and requested MAC chain, then decode.
 
-Finer levels would be transferred only to be discarded. Because the window
-starts at 0, offsets in the SEC zone table for levels `0..a` remain valid.
+Full loading therefore means the finest resolution the key unlocks, rather
+than downloading the full image regardless of its grant. A master-key thumbnail
+still fetches only the thumbnail's packet window. Plaintext uses the same
+resolution-window protocol; no secret key is needed.
 
-`upload()` derives `granularKeys` **client-side after** the round trip and
-attaches them to the response object:
+For an older reversed-chain file that lacks COM lookup metadata, the client
+fetches `0:0`, identifies the key with MAC[0] without decoding an image, and
+requests only `1:b` if more packets are needed. For Emage's single-tile streams,
+it reuses the coarsest bytes, patches Psot, and appends EOC. Other framing can
+use a correctly framed `0:b` prefix instead. The legacy **forward-chain** files
+from before the chain-direction fix must be re-encoded.
 
-```js
-out.granularKeys = this.granularKeys(out.layers || out.numResolutions || null);
-```
+`encodePixelData()` embeds the complete map in the returned image immediately.
+The uploader shows every intermediate key immediately after encoding. Upload
+preserves the map; when importing a native encode without a map, the client can
+add one if it holds the master. Only public tags and the IV are stored in COM;
+raw keys stay local. The client enriches upload results with `granularKeys`,
+`macs`, and `iv` for encrypted streams. Plaintext reports these as null.
 
-All three are gated on the codestream actually carrying a SEC marker, so a
-plaintext upload reports none of them. Nothing derived is transmitted. When no key is configured, or the stream has no
-SEC marker, `granularKeys` is `null`.
-
-`upload()` also refuses any buffer not ending in `EOC` — a layer slice is not a
-storable image — and sends `Content-Type: image/jp2` (the server ignores it, but
-omitting it makes the browser send `text/plain`, which misdescribes the bytes).
+Image transfers are counted separately from metadata. `transferredBytes` counts
+image response-body bytes, while `httpRequests` includes metadata and packet
+requests. New images normally require two requests. Legacy discovery can
+require a third request, but never downloads finer packets to identify a key.
 
 ### 8.4 Progressive resolution loading
 
-`_loadResolutions()` walks a descending series of DWT levels.
+`_loadResolutions()` fetches the necessary resolution prefix once and reuses it
+for a descending series of reduction values. Smaller display targets reduce
+both transferred bytes and decoding work. A and B in `compare.html` use the
+same bounded target window; the full-resolution baseline C uses a larger window
+when the key permits it.
 
-**The codestream is fetched once in full.** Resolution levels are spatially
-nested, not bandwidth-separable — a reduced-resolution decode still needs every
-byte. What reduction buys is *work*: level `r` decodes
-`ceil(W / 2^(E-r))` square, so the decoder never MQ-decodes the code blocks above
-`r`, never allocates the finer subband coefficient arrays, and never runs the
-high-pass synthesis path.
+A progressive pass shows coarser frames before the final image and adds CPU work
+relative to one-shot decoding. For a halving pyramid, the pixel counts form
+`1 + 1/4 + 1/16 + …` relative to the final frame, approaching 4/3; this is an
+estimate of sample work rather than a guarantee about total runtime.
 
-**Walking down is cheaper than decoding one-shot at the target.** Climbing
-coarse→fine costs `1 + 1/4 + 1/16 + …` of the final decode and yields every
-intermediate frame free, since each earlier frame has a quarter the samples of
-the next. This is the opposite of quality-layer truncation, where the first
-frame already costs a full-resolution raster and each later frame re-runs all its
-predecessors' passes.
+Full loading starts at the coarsest level. A reduced target starts up to
+`previewSteps` (default 2) levels earlier. The endpoint is capped by both the
+available packet window and the authenticated key level; inaccessible levels
+produce neither extra decodes nor duplicate frames. One-shot loading performs
+one decode. `decodes` counts real decoder invocations, including a discovery
+decode when an older server supplies no resolution count.
 
-**Start-point selection** (`previewSteps`, default 2):
-- Reduction 0 (full resolution) → start at the coarsest level. The classic
-  progressive experience.
-- Reduced target → start `previewSteps` early, skipping levels the target does
-  not need.
-- No known bound → start `previewSteps` past the target.
-
-**The bound probe.** If the server does not report a level count, a progressive
-pass probes with `reduction: 31`. Far past any real codestream, the native clamp
-reduces it to the coarsest level — making the probe the cheapest possible decode
-that also returns `numResolutions`. Without it the loop would overshoot and
-re-decode a level that gets clamped away. A one-shot decode never probes; it just
-lets the native side clamp and reports back.
-
-`decodes` counts **real decoder invocations**, including a discovery decode
-whether or not its level is reused — the figure stays honest. The probe's frame
-is reused only when the loop starts at exactly that level; widening the sequence
-to include it would paint a frame smaller than `previewSteps` asked for.
-
-`_minResolutionForSize()` rounds **up**, landing on the coarsest level at or
-below the target, so the raster is never more than 2× the target's area.
-Rounding down would guarantee an upscale, or cost 4× the samples to decode a
-level twice as large and let the browser discard three quarters of it.
-
-`_yieldForPaint()` uses **double** `requestAnimationFrame` to guarantee the
-current frame is composited before the next decode — otherwise progressive
-frames are coalesced away and only the last one is seen.
+`_minResolutionForSize()` rounds up to a reduction whose raster fits the target.
+`_yieldForPaint()` uses two animation frames so progressive frames are actually
+painted rather than coalesced into the final one.
 
 ---
 
@@ -830,21 +888,24 @@ Server URL/path/password; file picker; **Encode & decode** round trip; download
 the encrypted `.j2k`; load and decrypt an uploaded file. An **`secInput`**
 checkbox selects encrypted vs plaintext encoding and greys out the key/IV inputs
 when cleared. `layerInput` (resolution count); **`accessInput`** (access level,
-`all` default). Source and destination canvases with a stage label. Gallery:
+`all` default, interpreted as automatic access). Source and destination canvases with a stage label. Gallery:
 refresh listing, open, delete. Upload / **Verify roundtrip** / delete on server.
 A sticky **derived-keys table** on the right (`keysPanel`/`keysBody`/
 `copyKeysBtn`) listing one row per level — key, level index, the resolution it
 resolves to, and the key material — with rows inside the current access grant
-highlighted. Integrity is not a column: MACs are verified on every decode and
+highlighted. All intermediate keys appear immediately after encoding, before
+upload, and remain visible outside the highlighted grant. Integrity is not a column: MACs are verified on every decode and
 are not something the user acts on.
 
 ### `downloader.html` — progressive viewer
-Server URL/path; key/IV; `accessInput` for the grant. Breadcrumb file browser.
+Server URL/path and a granted key. `accessInput` is an optional resolution
+limit, blank for automatic key lookup. No IV or key level needs to be entered.
+Breadcrumb file browser.
 Fetch meta; load full; load for a display size (`10vw` etc.). Canvas with stage
 label showing each progressive level. Neither the IV nor the MACs are surfaced:
 both are internal to the format and the decoder handles them. Every load reports
-the fetched stream's protection in the status line — plaintext, or the zone
-count and active grant.
+the decoded dimensions and protection in the status line — plaintext, or the
+zone count and authenticated grant.
 
 ### `compare.html` — transfer strategy comparison
 Runs progressive vs one-shot vs full load side by side, three canvases with
@@ -872,12 +933,15 @@ Two targets, `EmageWasmEncoder` (`EXPORT_NAME=J2KEncoder`) and
 ```
 --bind  -sMODULARIZE=1  -sALLOW_MEMORY_GROWTH=1  -sENVIRONMENT=web
 -sNO_EXIT_RUNTIME=1  -sEXPORTED_FUNCTIONS=_malloc,_free
--sEXPORTED_RUNTIME_METHODS=HEAPU8  -sDISABLE_EXCEPTION_CATCHING=0  -O3
+-sEXPORTED_RUNTIME_METHODS=HEAPU8,stackSave,stackRestore,getExceptionMessage,decrementExceptionRefcount
+-sDISABLE_EXCEPTION_CATCHING=0  -O3
 ```
 
 `-sDISABLE_EXCEPTION_CATCHING=0` is deliberate: C++ exceptions surface as
 catchable JS errors instead of aborting the module, which keeps the page alive
-when a decode rejects a partial window.
+when a decode rejects a partial window. The JS wrapper restores the WASM
+stack and releases caught C++ exceptions so repeated invalid keys cannot
+exhaust the stack.
 
 A `POST_BUILD` step copies each `.js`/`.wasm` pair into
 `../EmageClient/cmake-build-wasm/`, which is where `emage.js` looks by default.
@@ -918,7 +982,11 @@ fixes ownership to `$APP_UID`.
 | `test_mac.js` | EmageWasm | Marker fields, MAC tampering, zone resizing |
 | `test_mac_server.mjs` | EmageClient | MAC survives a live-server window |
 | `test_random_iv.mjs` | EmageClient | Per-file IV, and no-IV decode |
-| `test_chain.mjs` | EmageClient | 85 checks against the **live** server |
+| `test_chain.mjs` | EmageClient | Live-server roundtrip and reduced-window bandwidth |
+| `test_key_metadata.mjs` | EmageClient | In-header lookup vectors, exact requests, wrong-key rejection |
+| `test_preview.mjs` | EmageClient | Live automatic grants, progressive frames, exact packet requests |
+| `test_cache_stale.mjs` | EmageClient | Re-upload refreshes bytes and header metadata together |
+| `MetadataTests.cs` | Emage server | Generic COM metadata, both stream types, window preservation |
 
 Fixtures: `encrypted.j2k`, `sample.lrcp.j2k`, `sample.rlcp.j2k`,
 `sample.sop.j2k`, `sample.nopl.j2k`, `src.ppm`.
@@ -1052,6 +1120,9 @@ rejected by `GET /image`.
 - Progressive multi-level rendering with coalescing-proof paint yields
 - Resolution-count probing when the server is silent
 - Honest decoder-invocation accounting
+- In-image COM key lookup maps with SHA3-256(IV || key) tags
+- Automatic resolution detection before packet downloads
+- Bounded packet windows for thumbnails and restricted keys
 - Hex/byte coercion, validation, and typed error classes
 
 **Demo UI**
