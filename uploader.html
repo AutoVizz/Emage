@@ -64,92 +64,188 @@
             margin-top: 8px;
         }
 
-        .gallery {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        .fs-view {
+            font-family: monospace;
+            font-size: 13px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            max-height: 320px;
+            overflow: auto;
+            margin-top: 8px;
+        }
+
+        .fs-row {
+            display: flex;
             gap: 10px;
-            margin-top: 10px;
-        }
-
-        .g-item {
-            background: #333;
-            border: 1px solid #555;
-            border-radius: 8px;
-            padding: 8px;
+            align-items: center;
+            padding: 4px 10px;
             cursor: pointer;
-            position: relative;
-            transition: border-color .15s, box-shadow .15s;
+            white-space: nowrap;
         }
 
-        .g-item:hover { border-color: #8cf; }
-
-        .g-item.selected {
-            border-color: #4f9;
-            box-shadow: 0 0 0 2px rgba(68, 255, 153, .35);
+        .fs-row:hover {
+            background: #333;
         }
 
-        .thumbbox {
+        .fs-row.selected {
+            background: #1d4b5f;
+        }
+
+        .fs-row .fs-name {
+            flex: 0 0 auto;
+        }
+
+        .fs-row.dir .fs-name {
+            color: #8fc;
+            font-weight: 600;
+        }
+
+        .fs-row .fs-info {
+            color: #777;
+            margin-left: auto;
+        }
+
+        .fs-row .fs-thumb {
+            flex: 0 0 auto;
+            width: 48px;
+            height: 36px;
+            background: #111;
+            border-radius: 3px;
+            overflow: hidden;
             display: flex;
             align-items: center;
             justify-content: center;
-            height: 104px;
-            background: #111;
-            border-radius: 4px;
-            overflow: hidden;
         }
 
-        .thumbbox canvas.thumb {
+        .fs-row .fs-thumb canvas {
+            max-width: 48px;
+            max-height: 36px;
             display: block;
-            max-width: 100%;
-            max-height: 104px;
-            background: #111;
         }
 
-        .g-placeholder {
+        .fs-row .fs-thumb .g-placeholder {
             color: #666;
-            font-size: 12px;
-            text-align: center;
+            font-size: 10px;
         }
 
-        .g-name {
-            font-size: 12px;
-            margin-top: 6px;
-            word-break: break-all;
-            max-height: 2.4em;
-            overflow: hidden;
-            line-height: 1.2;
-        }
-
-        .g-meta {
-            font-size: 11px;
-            color: #aaa;
-            margin-top: 2px;
-        }
-
-        .g-del {
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            background: rgba(0, 0, 0, .55);
-            color: #f77;
-            border: none;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            line-height: 1;
-            cursor: pointer;
-            opacity: 0;
-            transition: opacity .15s;
-        }
-
-        .g-item:hover .g-del { opacity: 1; }
-
-        .g-empty {
-            grid-column: 1 / -1;
-            text-align: center;
-            color: #999;
-            padding: 24px 0;
+        .fs-crumbs {
+            font-family: monospace;
             font-size: 13px;
+            color: #8cf;
+        }
+
+        .fs-crumbs .crumb {
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .fs-crumbs .crumb:hover {
+            background: #333;
+        }
+
+        .fs-crumbs .sep {
+            color: #666;
+        }
+
+        .fs-row .fs-keys {
+            display: inline-flex;
+            gap: 4px;
+        }
+
+        .key-badge {
+            font-size: 10px;
+            padding: 1px 5px;
+            border-radius: 8px;
+            background: #24506b;
+            color: #bfe9ff;
+            border: 1px solid #35668500;
+        }
+
+        .key-badge.locked {
+            background: #3a2020;
+            color: #f9b3b3;
+        }
+
+        .key-badge.plain {
+            background: #2c2c2c;
+            color: #999;
+        }
+
+        .kr-list {
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .kr-item {
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 6px 8px;
+            background: #262626;
+        }
+
+        .kr-item.active {
+            border-color: #4f9;
+            box-shadow: 0 0 0 1px rgba(68, 255, 153, .35);
+        }
+
+        .kr-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .kr-label {
+            font-weight: 600;
+            color: #dfe;
+        }
+
+        .kr-fp {
+            font-family: monospace;
+            font-size: 10px;
+            color: #888;
+        }
+
+        .kr-count {
+            margin-left: auto;
+            font-size: 11px;
+            color: #8cf;
+        }
+
+        .kr-imgs {
+            margin-top: 5px;
+            font-family: monospace;
+            font-size: 11px;
+            color: #9cf;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .kr-imgs .kr-img {
+            cursor: pointer;
+            color: #9cf;
+            word-break: break-all;
+        }
+
+        .kr-imgs .kr-img:hover {
+            color: #4f9;
+            text-decoration: underline;
+        }
+
+        .kr-empty {
+            color: #888;
+            font-size: 12px;
+            padding: 6px 0;
+        }
+
+        .btn-mini {
+            padding: 2px 8px;
+            font-size: 11px;
+            margin: 0;
         }
 
         /* Two-column shell: the pipeline on the left, the derived-key table
@@ -267,14 +363,13 @@
     <div class="row">
         <span>AES Key (hex, 32 bytes):</span>
         <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
+        <button id="keyGenBtn" class="btn-mini">Random key</button>
     </div>
     <div class="row">
-        <span>J2K resolutions (DWT levels, max 100):</span>
-        <input type="number" id="layerInput" value="6" min="1" max="100" style="width:70px">
-    </div>
-    <div class="row">
-        <span>Access level (highest readable level, 0 = coarsest; blank = all):</span>
-        <input type="number" id="accessInput" placeholder="all" min="0" style="width:70px">
+        <span>J2K resolutions (DWT levels):</span>
+        <input type="number" id="layerInput" value="6" min="1" max="64" style="width:70px"
+               title="Max depends on image size — updates automatically when you pick an image">
+        <span id="layerRange" style="font-size:12px; color:#8cf;">1–64</span>
     </div>
     <div style="display:flex; gap:20px; flex-wrap:wrap;">
         <div>
@@ -290,18 +385,24 @@
 </div>
 
 <div class="card">
-    <h3>2. Server images (gallery)</h3>
+    <h3>2. Server images (virtual filesystem)</h3>
     <div class="row">
         <button id="galleryBtn">Refresh listing</button>
         <button id="gOpenBtn" disabled>Open selected</button>
         <button id="gDelBtn" disabled>Delete selected</button>
+        <span id="fsCrumbs" class="fs-crumbs"></span>
         <span id="gCount" style="font-size:12px;color:#aaa;"></span>
     </div>
-    <div id="gallery" class="gallery"></div>
+    <div id="fsView" class="fs-view"></div>
     <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
-        Lists every file on the server and renders a decrypted preview of each J2K using the AES
-        key/IV above. Click a thumbnail to select it (fills the image path); double-click to load it
-        into the pipeline; hover for a per-image delete button.
+        Image paths are shown like files under a virtual root. Folders are derived from the path
+        components, so <code>sub/dir/photo.j2k</code> appears in <code>sub/dir/</code>. Click a folder
+        to descend; click a file to select it (fills the image path); double-click to load it
+        into the pipeline. Thumbnails pick the first ring key that unlocks each image,
+        falling back to the AES key/IV above. The badges beside a file name list which
+        saved keys decrypt it (<span class="key-badge plain">plain</span> = no lookup
+        header, <span class="key-badge locked">locked</span> = no ring key fits); click a
+        badge to make that key active.
     </p>
 </div>
 
@@ -309,7 +410,6 @@
     <h3>3. Server actions</h3>
     <div class="row">
         <button id="upBtn" disabled>Upload current J2K</button>
-        <button id="verifyBtn" disabled>Verify roundtrip</button>
         <button id="delBtn" disabled>Delete on server</button>
     </div>
     <div id="status"></div>
@@ -348,6 +448,28 @@
         </div>
         <div class="row" style="margin-top:8px;">
             <button id="copyKeysBtn" disabled>Copy all keys</button>
+        </div>
+    </div>
+
+    <div class="card" id="keyringPanel">
+        <h3>Key ring &amp; image coverage</h3>
+        <p style="margin:0 0 8px; color:#9a9; font-size:12px;">
+            Every saved key is tested against every image on the server without
+            downloading any image data: each encrypted image carries a lookup
+            header mapping <code>SHA3-256(IV ‖ K)</code> to a resolution level,
+            so a local hash comparison tells you which images a key opens. The
+            map is cached in this browser and only re-scanned when an image
+            changes.
+        </p>
+        <div class="row">
+            <input type="text" id="krLabel" placeholder="key label" size="12">
+            <button id="krAddBtn" class="btn-mini">Add current key</button>
+            <button id="krScanBtn" class="btn-mini">Rescan</button>
+        </div>
+        <div id="krList" class="kr-list"></div>
+        <div class="kr-empty" id="krEmpty">
+            No keys saved yet. Add the key above to see which server images it
+            decrypts.
         </div>
     </div>
 </aside>
@@ -390,6 +512,19 @@
         return iv;
     }
 
+    function randomKey() {
+        const webcrypto = globalThis.crypto;
+        if (!webcrypto || !webcrypto.getRandomValues) {
+            status('crypto.getRandomValues unavailable: cannot generate a key safely');
+            return;
+        }
+        const bytes = new Uint8Array(32);
+        webcrypto.getRandomValues(bytes);
+        $('keyInput').value = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+        if (emage) syncConfig();
+        status('Generated a new random AES-256 key.');
+    }
+
     // Push UI inputs into the library's mutable state.
     function syncConfig() {
         emage.setServer({
@@ -400,8 +535,6 @@
         emage.setCrypto({
             key: $('keyInput').value,
             iv: currentIv,
-            accessLevel: $('accessInput').value.trim() === '' ? -1
-                : Number($('accessInput').value),
         });
     }
 
@@ -414,9 +547,10 @@
     }
 
     $('secInput').addEventListener('change', syncSecInputs);
+    $('keyGenBtn').addEventListener('click', randomKey);
 
     function setJ2kDependent(enabled) {
-        for (const id of ['downloadBtn', 'decodeBtn', 'upBtn', 'verifyBtn']) {
+        for (const id of ['downloadBtn', 'decodeBtn', 'upBtn']) {
             $(id).disabled = !enabled;
         }
         // The listed keys describe one specific encoded stream. Reaching this with
@@ -436,6 +570,16 @@
             $('processBtn').disabled = false;
             $('delBtn').disabled = false;
             drawDefaultPattern();
+            keyRing = loadKeys();
+            imageCrypto = loadImageIndex();
+            rebuildPathIndex();
+            const savedActive = readStore(LS_ACTIVE, null);
+            if (savedActive && keyRing.some((k) => k.id === savedActive)) {
+                activeKeyId = savedActive;
+                $('keyInput').value = keyRing.find((k) => k.id === savedActive).key;
+                syncConfig();
+            }
+            buildCoverage();
             status('Ready. Load an image to encode.');
             loadGallery();
         })
@@ -461,11 +605,8 @@
     }
 
     // Decode a codestream into dstCanvas using the library's key/IV.
-    // This page holds the master; derive Ka for a restricted preview.
     function ownerDecodeOptions(count) {
-        const grant = emage.crypto.accessLevel;
-        if (grant == null || grant < 0 || !count || grant >= count - 1) return {};
-        return { key: emage.granularKeys(count)[grant] };
+        return {};
     }
 
     function decodeToCanvas(stream, label) {
@@ -505,10 +646,7 @@
     $('copyKeysBtn').disabled = false;
 
     const total = keys.length - 1;
-    // Rows inside the configured access grant: those are the keys a recipient
-    // of that grant actually holds.
-    const grant = (emage && emage.crypto) ? emage.crypto.accessLevel : -1;
-    const granted = (grant == null || grant < 0) ? total : Math.min(grant, total);
+    const granted = total;
 
     keys.forEach((k, i) => {
         // Holding Ki derives K0..Ki and reconstructs resolution level i,
@@ -567,6 +705,7 @@
             status(`uploaded ${data.stored}: ${data.width}x${data.height}, ` +
                 `layers=${data.layers}, bytes=${data.bytes}`);
             showGranularKeys(data.granularKeys, data.width, data.height);
+            seedUploadedImage(data.stored);
             loadGallery();
         } catch (err) {
             status('upload error: ' + fmtErr(err));
@@ -576,53 +715,29 @@
     async function onDelete() {
         try {
             syncConfig();
+            const path = emage.server.imagePath;
             const data = await emage.remove();
+            forgetImage(path);
             status(`deleted ${data.deleted}`);
         } catch (err) {
             status('delete error: ' + fmtErr(err));
         }
     }
 
-    // Upload, load back from the server, and count differing pixels vs the
-    // local decode. 0 diffs means the server roundtrip is pixel-identical.
-    async function onVerify() {
-        if (!emage.j2k) {
-            status('Verify needs a locally encoded J2K — encode an image first.');
-            return;
-        }
-        try {
-            syncConfig();
-            status('verifying: uploading and re-downloading...');
-            await emage.upload(emage.j2k);
-            const zones = emage.describeSecurityZone(emage.j2k);
-            const options = ownerDecodeOptions(zones.zoneCount);
-            const local = emage.decode(emage.j2k, options);
-            const out = await emage.playAll(options);
-            const server = out.decoded;
-            if (local.width !== server.width || local.height !== server.height) {
-                status(`verify: DIMENSION MISMATCH (${local.width}x${local.height} vs ` +
-                    `${server.width}x${server.height})`);
-                return;
-            }
-            let diff = 0;
-            const short = Math.min(local.rgbaPixels.length, server.rgbaPixels.length);
-            for (let i = 0; i < short; ++i) {
-                if (local.rgbaPixels[i] !== server.rgbaPixels[i]) ++diff;
-            }
-            diff += Math.abs(local.rgbaPixels.length - server.rgbaPixels.length);
-            status(diff === 0
-                ? `verify: PASS — server roundtrip is pixel-identical`
-                : `verify: FAIL — ${diff} differing pixels`);
-            emage.paintTo(dstCanvas, server);
-            $('stageLabel').textContent = `Server roundtrip (${out.stream.length} bytes)`;
-        } catch (err) {
-            status('verify error: ' + fmtErr(err));
-        }
-    }
-
     // ---------------------------------------------------------------------
     // Local pipeline (PNG → encode → decode)
     // ---------------------------------------------------------------------
+
+    const clampToRange = (input) => {
+        const min = parseInt(input.min, 10);
+        const max = parseInt(input.max, 10);
+        input.addEventListener('change', () => {
+            const v = parseInt(input.value, 10);
+            if (Number.isNaN(v) || v < min) input.value = min;
+            else if (v > max) input.value = max;
+        });
+    };
+    clampToRange($('layerInput'));
 
     $('fileInput').addEventListener('change', (e) => {
         const file = e.target.files[0];
@@ -633,6 +748,11 @@
             srcCanvas.height = img.height;
             const ctx = srcCanvas.getContext('2d');
             ctx.drawImage(img, 0, 0);
+            const maxLevels = Math.min(64, Math.floor(Math.log2(Math.min(img.width, img.height))) + 1);
+            const layerInput = $('layerInput');
+            layerInput.max = maxLevels;
+            layerInput.value = Math.min(parseInt(layerInput.value, 10) || 6, maxLevels);
+            $('layerRange').textContent = `1–${maxLevels}`;
             status(`Loaded image: ${img.width}x${img.height}`);
         };
         img.src = URL.createObjectURL(file);
@@ -673,15 +793,305 @@
 
     $('upBtn').addEventListener('click', onUpload);
     $('copyKeysBtn').addEventListener('click', onCopyKeys);
-    $('verifyBtn').addEventListener('click', onVerify);
     $('delBtn').addEventListener('click', onDelete);
 
     // ---------------------------------------------------------------------
-    // Server image gallery
+    // Server image browser (virtual filesystem + thumbnails)
     // ---------------------------------------------------------------------
 
-    const gallery = $('gallery');
+    let fsTable = [];
+    let fsCwd = [];
     let galleryTick = 0;
+
+    const THUMB_SIZE = 48;
+
+    const LS_KEYS = 'emage.keyring.v1';
+    const LS_IMAGES = 'emage.images.v1';
+    const LS_ACTIVE = 'emage.activeKey.v1';
+
+    let keyRing = [];
+    let imageCrypto = {};
+    let pathIndex = {};
+    let keyCoverage = {};
+    let activeKeyId = null;
+
+    function fnv1aHex(str) {
+        let h1 = 0x811c9dc5;
+        let h2 = 0x1000193;
+        for (let i = 0; i < str.length; ++i) {
+            const c = str.charCodeAt(i);
+            h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+            h2 = Math.imul(h2 ^ c, 0x85ebca6b) >>> 0;
+        }
+        return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+    }
+
+    function imageHash(path) { return 'p' + fnv1aHex(String(path)); }
+    function keyHash(hex) { return 'k' + fnv1aHex(String(hex).toLowerCase()); }
+
+    function readStore(key, fallback) {
+        try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : fallback;
+        } catch (_) {
+            return fallback;
+        }
+    }
+
+    function writeStore(key, value) {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+    }
+
+    function loadImageIndex() {
+        const obj = readStore(LS_IMAGES, {});
+        return obj && typeof obj === 'object' ? obj : {};
+    }
+
+    function saveImageIndex(idx) { writeStore(LS_IMAGES, idx); }
+
+    function rebuildPathIndex() {
+        pathIndex = {};
+        for (const id of Object.keys(imageCrypto)) {
+            const rec = imageCrypto[id];
+            if (rec && rec.path) pathIndex[rec.path] = id;
+        }
+    }
+
+    function imageIdFor(idx, path) {
+        for (const id of Object.keys(idx)) {
+            if (idx[id] && idx[id].path === path) return id;
+        }
+        const base = imageHash(path);
+        let id = base;
+        let n = 0;
+        while (idx[id]) id = base + '~' + (++n);
+        return id;
+    }
+
+    function currentKeyHex() { return $('keyInput').value.trim(); }
+
+    function unlockLevel(rec, keyHex) {
+        if (!emage || !rec || !rec.iv || !rec.levels || !keyHex) return -1;
+        let tag;
+        try { tag = emage.keyLookupTag(keyHex, rec.iv); } catch (_) { return -1; }
+        if (!Object.prototype.hasOwnProperty.call(rec.levels, tag)) return -1;
+        const lvl = rec.levels[tag];
+        return Number.isInteger(lvl) ? lvl : -1;
+    }
+
+    function unlockKeyFor(path) {
+        const id = pathIndex[path];
+        const rec = id ? imageCrypto[id] : null;
+        const cur = currentKeyHex();
+        if (rec && unlockLevel(rec, cur) >= 0) return cur;
+        if (rec && rec.levels) {
+            const hit = keyRing.find((k) => unlockLevel(rec, k.key) >= 0);
+            if (hit) return hit.key;
+        }
+        return null;
+    }
+
+    function loadKeys() {
+        const arr = readStore(LS_KEYS, []);
+        if (!Array.isArray(arr)) return [];
+        return arr.filter((k) => k && typeof k.key === 'string' && /^[0-9a-fA-F]{64}$/.test(k.key))
+            .map((k) => ({
+                id: k.id || keyHash(k.key),
+                label: typeof k.label === 'string' ? k.label : '',
+                key: k.key.toLowerCase(),
+            }));
+    }
+
+    function saveKeys() { writeStore(LS_KEYS, keyRing); }
+
+    async function mapLimit(items, limit, worker) {
+        const queue = items.slice();
+        const runners = [];
+        const n = Math.min(limit, queue.length);
+        for (let i = 0; i < n; ++i) {
+            runners.push((async () => {
+                while (queue.length) await worker(queue.shift());
+            })());
+        }
+        await Promise.all(runners);
+    }
+
+    function buildCoverage() {
+        const coverage = {};
+        for (const id of Object.keys(imageCrypto)) coverage[id] = [];
+        for (const k of keyRing) {
+            for (const id of Object.keys(imageCrypto)) {
+                if (unlockLevel(imageCrypto[id], k.key) >= 0) coverage[id].push(k.id);
+            }
+        }
+        keyCoverage = coverage;
+        renderKeyring();
+    }
+
+    async function scanCoverage(list, tick) {
+        const prev = loadImageIndex();
+        const next = {};
+        const stale = [];
+        for (const img of list) {
+            const id = imageIdFor(next, img.path);
+            const rec = prev[id];
+            if (rec && rec.path === img.path && rec.bytes === img.bytes && rec.iv && rec.levels) {
+                next[id] = rec;
+            } else {
+                const prior = rec && rec.path === img.path ? rec : {};
+                next[id] = {
+                    path: img.path,
+                    bytes: img.bytes,
+                    iv: prior.iv || null,
+                    levels: prior.levels || null,
+                };
+                if (!next[id].iv || next[id].bytes !== img.bytes) stale.push({ id, path: img.path });
+            }
+        }
+        const priorPath = emage.server.imagePath;
+        await mapLimit(stale, 4, async ({ id, path }) => {
+            try {
+                emage.server.imagePath = path;
+                const meta = await emage.meta();
+                const km = meta.metadata && meta.metadata.keyMap;
+                if (km && km.iv && km.levels && typeof km.levels === 'object') {
+                    next[id].iv = km.iv;
+                    next[id].levels = km.levels;
+                }
+            } catch (_) {}
+        });
+        emage.server.imagePath = priorPath;
+        if (tick != null && tick !== galleryTick) return null;
+        saveImageIndex(next);
+        imageCrypto = next;
+        rebuildPathIndex();
+        buildCoverage();
+        return next;
+    }
+
+    function seedUploadedImage(path) {
+        if (!path || !emage.j2k) return;
+        const km = Emage.readMetadata(emage.j2k)?.keyMap;
+        if (!km || !km.iv || !km.levels) return;
+        const idx = loadImageIndex();
+        const id = imageIdFor(idx, path);
+        idx[id] = { path, bytes: emage.j2k.length, iv: km.iv, levels: km.levels };
+        saveImageIndex(idx);
+        imageCrypto = idx;
+        rebuildPathIndex();
+        buildCoverage();
+    }
+
+    function forgetImage(path) {
+        const id = pathIndex[path];
+        if (!id) return;
+        const idx = loadImageIndex();
+        delete idx[id];
+        saveImageIndex(idx);
+        imageCrypto = idx;
+        rebuildPathIndex();
+        buildCoverage();
+    }
+
+    function setActiveKey(id) {
+        const k = keyRing.find((x) => x.id === id);
+        if (!k) return;
+        activeKeyId = id;
+        $('keyInput').value = k.key;
+        writeStore(LS_ACTIVE, id);
+        syncConfig();
+        renderKeyring();
+        renderFs();
+    }
+
+    function addKey() {
+        const hex = currentKeyHex();
+        if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+            status('Key ring: enter a 64-hex-digit AES-256 key first.');
+            return;
+        }
+        const id = keyHash(hex);
+        if (keyRing.some((k) => k.id === id)) {
+            setActiveKey(id);
+            status(`Key ${id} is already in the ring.`);
+            return;
+        }
+        const label = $('krLabel').value.trim();
+        keyRing.push({ id, label: label || ('key ' + keyRing.length), key: hex.toLowerCase() });
+        saveKeys();
+        $('krLabel').value = '';
+        setActiveKey(id);
+        status(`Added key ${id} to the ring.`);
+    }
+
+    function removeKey(id) {
+        keyRing = keyRing.filter((k) => k.id !== id);
+        if (activeKeyId === id) activeKeyId = null;
+        saveKeys();
+        buildCoverage();
+    }
+
+    function renderKeyring() {
+        const list = $('krList');
+        list.innerHTML = '';
+        $('krEmpty').style.display = keyRing.length ? 'none' : 'block';
+        const ids = Object.keys(imageCrypto);
+        for (const k of keyRing) {
+            const item = document.createElement('div');
+            item.className = 'kr-item' + (k.id === activeKeyId ? ' active' : '');
+
+            const head = document.createElement('div');
+            head.className = 'kr-head';
+
+            const label = document.createElement('span');
+            label.className = 'kr-label';
+            label.textContent = k.label || k.id;
+            head.appendChild(label);
+
+            const fp = document.createElement('span');
+            fp.className = 'kr-fp';
+            fp.textContent = k.id;
+            fp.title = k.key;
+            head.appendChild(fp);
+
+            const unlocked = ids.filter((id) => (keyCoverage[id] || []).includes(k.id));
+            const count = document.createElement('span');
+            count.className = 'kr-count';
+            count.textContent = unlocked.length + (unlocked.length === 1 ? ' image' : ' images');
+            head.appendChild(count);
+
+            const use = document.createElement('button');
+            use.className = 'btn-mini';
+            use.textContent = k.id === activeKeyId ? 'Active' : 'Use';
+            use.title = 'Use this key for encoding and decryption';
+            use.addEventListener('click', () => setActiveKey(k.id));
+            head.appendChild(use);
+
+            const del = document.createElement('button');
+            del.className = 'btn-mini';
+            del.textContent = '\u2715';
+            del.title = 'Remove this key from the ring';
+            del.addEventListener('click', () => removeKey(k.id));
+            head.appendChild(del);
+
+            item.appendChild(head);
+
+            if (unlocked.length) {
+                const imgs = document.createElement('div');
+                imgs.className = 'kr-imgs';
+                for (const id of unlocked.sort()) {
+                    const p = document.createElement('span');
+                    p.className = 'kr-img';
+                    p.textContent = imageCrypto[id].path;
+                    p.title = 'select this image';
+                    p.addEventListener('click', () => selectImage(imageCrypto[id].path));
+                    imgs.appendChild(p);
+                }
+                item.appendChild(imgs);
+            }
+            list.appendChild(item);
+        }
+    }
 
     function humanBytes(n) {
         if (n == null || !Number.isFinite(n)) return '?';
@@ -699,11 +1109,11 @@
     function selectImage(path) {
         $('imgPath').value = path;
         if (emage) emage.server.imagePath = path;
-        for (const el of gallery.querySelectorAll('.g-item')) {
+        for (const el of document.querySelectorAll('.fs-row')) {
             el.classList.toggle('selected', el.dataset.path === path);
         }
         setSelButtons(true);
-        status(`Selected ${path} — open it, verify the roundtrip, or delete it.`);
+        status(`Selected ${path} — open it or delete it.`);
     }
 
     async function openImage(path) {
@@ -722,81 +1132,142 @@
         }
     }
 
-    function makeGalleryCard(img) {
-        const card = document.createElement('div');
-        card.className = 'g-item';
-        card.dataset.path = img.path;
-
-        const box = document.createElement('div');
-        box.className = 'thumbbox';
-        box.innerHTML = '<div class="g-placeholder">\u2026</div>';
-        card.appendChild(box);
-
-        const name = document.createElement('div');
-        name.className = 'g-name';
-        name.textContent = img.path;
-        name.title = img.path;
-        card.appendChild(name);
-
-        const meta = document.createElement('div');
-        meta.className = 'g-meta';
-        const parts = [humanBytes(img.bytes)];
-        if (img.layers != null) parts.push(`${img.width}\u00d7${img.height}`, `${img.layers} layers`);
-        else parts.push('not a J2K codestream');
-        meta.textContent = parts.join(' \u00b7 ');
-        card.appendChild(meta);
-
-        const del = document.createElement('button');
-        del.className = 'g-del';
-        del.title = 'Delete on server';
-        del.textContent = '\u2715';
-        del.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            if (!confirm(`Delete "${img.path}" on the server?`)) return;
-            try {
-                syncConfig();
-                emage.server.imagePath = img.path;
-                const data = await emage.remove();
-                status(`deleted ${data.deleted}`);
-                loadGallery();
-            } catch (err) {
-                status('delete error: ' + fmtErr(err));
-            }
-        });
-        card.appendChild(del);
-
-        card.addEventListener('click', () => selectImage(img.path));
-        card.addEventListener('dblclick', () => openImage(img.path));
-        return card;
+    function keyBadges(path) {
+        const wrap = document.createElement('span');
+        wrap.className = 'fs-keys';
+        const id = pathIndex[path];
+        const rec = id ? imageCrypto[id] : null;
+        if (!rec) return wrap;
+        if (!rec.iv || !rec.levels) {
+            const b = document.createElement('span');
+            b.className = 'key-badge plain';
+            b.textContent = 'plain';
+            b.title = 'no key lookup header — not encrypted by this client';
+            wrap.appendChild(b);
+            return wrap;
+        }
+        const unlocked = keyCoverage[id] || [];
+        if (!unlocked.length) {
+            const b = document.createElement('span');
+            b.className = 'key-badge locked';
+            b.textContent = 'locked';
+            b.title = 'no key in the ring decrypts this image';
+            wrap.appendChild(b);
+            return wrap;
+        }
+        for (const kid of unlocked) {
+            const k = keyRing.find((x) => x.id === kid);
+            const b = document.createElement('span');
+            b.className = 'key-badge';
+            b.textContent = k ? (k.label || kid) : kid;
+            b.title = 'decryptable with ' + (k ? `${k.label} (${kid})` : kid) + ' — click to activate';
+            b.addEventListener('click', (e) => { e.stopPropagation(); setActiveKey(kid); });
+            wrap.appendChild(b);
+        }
+        return wrap;
     }
 
-    async function renderThumb(img, card) {
-        const box = card.querySelector('.thumbbox');
-        try {
-            emage.server.imagePath = img.path;
-            const out = await emage.preview(ownerDecodeOptions(img.layers));
+    function renderThumb(img, row) {
+        const box = row.querySelector('.fs-thumb');
+        box.innerHTML = '<span class="g-placeholder">\u2026</span>';
+        emage.server.imagePath = img.path;
+        const canvas = document.createElement('canvas');
+        const opts = { progressive: false, canvas };
+        const key = unlockKeyFor(img.path);
+        if (key) opts.key = key;
+        emage.display(THUMB_SIZE, opts).then((out) => {
             const d = out.decoded;
             if (!d) throw new EmageError('no decoded output');
-            const scale = Math.min(160 / d.width, 104 / d.height);
-            const w = Math.max(1, Math.round(d.width * scale));
-            const h = Math.max(1, Math.round(d.height * scale));
-            const tmp = document.createElement('canvas');
-            tmp.width = d.width;
-            tmp.height = d.height;
-            tmp.getContext('2d').putImageData(new ImageData(d.rgbaPixels, d.width, d.height), 0, 0);
-            const canvas = document.createElement('canvas');
-            canvas.className = 'thumb';
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.imageSmoothingEnabled = true;
-            ctx.drawImage(tmp, 0, 0, w, h);
             box.innerHTML = '';
             box.appendChild(canvas);
             box.title = `${d.width}\u00d7${d.height}`;
-        } catch (err) {
-            box.innerHTML = '<div class="g-placeholder">no preview</div>';
+        }).catch((err) => {
+            box.innerHTML = '<span class="g-placeholder">no preview</span>';
             box.title = fmtErr(err);
+        });
+    }
+
+    function renderFs() {
+        const dirs = new Set();
+        const files = [];
+        for (const img of fsTable) {
+            const comps = img.comps;
+            if (fsCwd.length === 0) {
+                if (comps.length > 1) dirs.add(comps[0]);
+                else files.push(img);
+            } else {
+                if (comps.length <= fsCwd.length) continue;
+                const same = fsCwd.every((d, i) => comps[i] === d);
+                if (!same) continue;
+                if (comps.length === fsCwd.length + 1) files.push(img);
+                else dirs.add(comps[fsCwd.length]);
+            }
+        }
+
+        const crumbs = $('fsCrumbs');
+        crumbs.innerHTML = '';
+        const crumb = (label, depth) => {
+            const span = document.createElement('span');
+            span.className = 'crumb';
+            span.textContent = label;
+            span.title = label === 'root' ? 'virtual filesystem root' : 'navigate up to this folder';
+            span.addEventListener('click', () => { fsCwd = fsCwd.slice(0, depth); renderFs(); });
+            crumbs.appendChild(span);
+        };
+        crumb('root', 0);
+        fsCwd.forEach((d, i) => {
+            const sep = document.createElement('span');
+            sep.className = 'sep';
+            sep.textContent = ' / ';
+            crumbs.appendChild(sep);
+            crumb(d, i + 1);
+        });
+
+        const view = $('fsView');
+        view.innerHTML = '';
+        const addEntry = (name, cls, cb) => {
+            const row = document.createElement('div');
+            row.className = 'fs-row' + (cls ? ' ' + cls : '');
+            const nm = document.createElement('span');
+            nm.className = 'fs-name';
+            if (cls === 'dir') nm.textContent = name + '/';
+            else nm.textContent = name;
+            row.appendChild(nm);
+            if (cb) row.addEventListener('click', cb);
+            view.appendChild(row);
+            return row;
+        };
+        if (fsCwd.length) {
+            addEntry('..', 'dir', () => { fsCwd.pop(); renderFs(); });
+        }
+        for (const d of [...dirs].sort()) {
+            addEntry(d, 'dir', () => { fsCwd.push(d); renderFs(); });
+        }
+        const info = (img) => {
+            const parts = [humanBytes(img.bytes)];
+            if (img.layers != null) parts.push(`${img.width}\u00d7${img.height}`, `${img.layers} layers`);
+            else parts.push('not a J2K codestream');
+            return parts.join(' \u00b7 ');
+        };
+        files.sort((a, b) => a.comps[a.comps.length - 1].localeCompare(b.comps[b.comps.length - 1]));
+        for (const img of files) {
+            const name = img.comps[img.comps.length - 1];
+            const path = fsCwd.length ? fsCwd.join('/') + '/' + name : name;
+            const row = addEntry(name, 'file', () => selectImage(row.dataset.path));
+            row.dataset.path = path;
+            const thumb = document.createElement('div');
+            thumb.className = 'fs-thumb';
+            row.insertBefore(thumb, row.firstChild);
+            row.appendChild(keyBadges(path));
+            const meta = document.createElement('span');
+            meta.className = 'fs-info';
+            meta.textContent = info(img);
+            row.appendChild(meta);
+            row.addEventListener('dblclick', () => { selectImage(row.dataset.path); openImage(row.dataset.path); });
+            renderThumb(img, row);
+        }
+        if (view.children.length === 0) {
+            view.innerHTML = '<div class="fs-row" style="color:#888;">(empty directory)</div>';
         }
     }
 
@@ -804,45 +1275,36 @@
         if (!emage) return;
         syncConfig();
         const tick = ++galleryTick;
-        status('Listing server images\u2026');
-        gallery.innerHTML = '<div class="g-empty">listing\u2026</div>';
+        status('Listing server images…');
+        $('fsView').innerHTML = '<div class="fs-row" style="color:#888;">listing…</div>';
         let list;
         try {
             list = await emage.list();
         } catch (err) {
             status('listing error: ' + fmtErr(err));
-            gallery.innerHTML = '';
+            $('fsView').innerHTML = '';
             $('gCount').textContent = '';
             return;
         }
         if (tick !== galleryTick) return;
-        gallery.innerHTML = '';
-        if (!list.length) {
-            $('gCount').textContent = '0 images';
-            gallery.innerHTML = '<div class="g-empty">No images on the server yet \u2014 encode &amp; upload one above.</div>';
+        fsTable = list.map((img) => ({ ...img, comps: img.path.split('/').filter(Boolean) }));
+        fsCwd = [];
+        $('gCount').textContent = fsTable.length + (fsTable.length === 1 ? ' image' : ' images');
+        if (fsTable.length) status(`Scanning ${fsTable.length} image(s) for key coverage…`);
+        await scanCoverage(list, tick);
+        if (tick !== galleryTick) return;
+        renderFs();
+        if (!fsTable.length) {
             status('Server image root is empty.');
-            return;
+        } else {
+            status(`${fsTable.length} image(s). Click to select — double-click to open.`);
         }
-        $('gCount').textContent = list.length + (list.length === 1 ? ' image' : ' images');
-        const cards = [];
-        for (const img of list) {
-            if (tick !== galleryTick) return;
-            const card = makeGalleryCard(img);
-            cards.push({ img, card });
-            gallery.appendChild(card);
-        }
-        if (tick !== galleryTick) return;
-        status(`Fetching thumbnails (${cards.length})\u2026`);
-        for (const { img, card } of cards) {
-            if (tick !== galleryTick) return;
-            await renderThumb(img, card);
-        }
-        if (tick !== galleryTick) return;
-        setSelButtons($('imgPath').value.trim() ? true : false);
-        status(`${list.length} image(s). Click to select \u2014 double-click to open.`);
     }
 
     $('galleryBtn').addEventListener('click', loadGallery);
+    $('krAddBtn').addEventListener('click', addKey);
+    $('krScanBtn').addEventListener('click', loadGallery);
+    $('krLabel').addEventListener('keydown', (e) => { if (e.key === 'Enter') addKey(); });
     $('gOpenBtn').addEventListener('click', () => {
         const path = $('imgPath').value.trim();
         if (path) openImage(path);
@@ -853,7 +1315,9 @@
         if (!confirm(`Delete "${path}" on the server?`)) return;
         try {
             syncConfig();
+            const path = emage.server.imagePath;
             const data = await emage.remove();
+            forgetImage(path);
             status(`deleted ${data.deleted}`);
             setSelButtons(false);
             loadGallery();

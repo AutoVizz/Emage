@@ -57,15 +57,29 @@ globalThis.fetch = async (url, init) => {
     if (mode === 'meta') {
         return { ok: true, text: async () => JSON.stringify({ width: W, height: H, layers: RES, bytes: encoded.length, metadata }) };
     }
-    if (!/^0:[0-5]$/.test(mode)) throw new Error('Unexpected packet request: ' + mode);
-    const data = prefix(Number(mode.split(':')[1]));
-    return { ok: true, arrayBuffer: async () => data.buffer };
+    const m = /^(\d+):(\d+)$/.exec(mode);
+    if (!m) throw new Error('Unexpected packet request: ' + mode);
+    const first = Number(m[1]);
+    const last = Number(m[2]);
+    if (first > 0) {
+        const data = encoded.slice(
+            payloadStart + zones.starts[first],
+            payloadStart + zones.starts[last] + zones.sizes[last]);
+        return { ok: true, arrayBuffer: async () => data.buffer };
+    }
+    const data = prefix(last);
+    return {
+        ok: true,
+        arrayBuffer: async () => data.buffer,
+        headers: { get: (k) => (k === 'X-Emage-TilePsotOffsets' ? String(sot + 6) : null) },
+    };
 };
 for (let level = 0; level < RES; ++level) {
     emage.setCrypto({ key: keys[level], accessLevel: 'all' });
     requests = [];
     const out = await emage.playAll();
-    check(requests.join(',') === `meta,0:${level}`, `K${level}: metadata lookup then exactly one required window`);
+    const expected = 'meta,' + Array.from({ length: level + 1 }, (_, i) => `${i}:${i}`).join(',');
+    check(requests.join(',') === expected, `K${level}: metadata lookup then one incremental window per accessible level`);
     check(out.decoded.keyLevel === level && out.decoded.width === Math.ceil(W / 2 ** (RES - 1 - level)),
         `K${level}: automatic load resolves to its authenticated resolution`);
     check(out.steps.length === level + 1, `K${level}: progressive loading stops at its accessible level`);

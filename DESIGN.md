@@ -806,7 +806,9 @@ For a new encrypted image, `display()`, `preview()` and `playAll()`:
    `metadata.keyMap.levels`. An unmatched key stops here.
 3. Compute the needed level b from the requested reduction r: `E−1−r`,
    clamped to 0, the key's level a, and any explicit `accessLevel` ceiling.
-4. Fetch exactly `X-Emage-Layers: 0:b`, including headers and EOC.
+4. A one-shot request fetches exactly `X-Emage-Layers: 0:b`, including headers
+   and EOC. A progressive request fetches `0:b0` framed, then `b_{i-1}+1:b_i`
+   per later frame, appending as it goes (§8.4).
 5. Authenticate the key level and requested MAC chain, then decode.
 
 Full loading therefore means the finest resolution the key unlocks, rather
@@ -830,32 +832,95 @@ raw keys stay local. The client enriches upload results with `granularKeys`,
 
 Image transfers are counted separately from metadata. `transferredBytes` counts
 image response-body bytes, while `httpRequests` includes metadata and packet
-requests. New images normally require two requests. Legacy discovery can
-require a third request, but never downloads finer packets to identify a key.
+requests. A one-shot load uses two requests (metadata plus one window). A
+progressive load uses one extra packet request per frame, but the summed body
+bytes never exceed the one-shot prefix it would have needed. Legacy discovery
+can add a probe request, but never downloads finer packets to identify a key.
+
+### 8.3.1 Client-side key ring and image coverage map (uploader)
+
+The uploader no longer assumes one master key answers for the whole server.
+It keeps a **key ring** (saved AES-256 keys, `localStorage: emage.keyring.v1`)
+and an **image index** (`localStorage: emage.images.v1`) mapping each server
+image to the public lookup header it carries.
+
+- Identity is a local hash of the path (`p` + 64-bit FNV-1a of the path, with a
+  `~n` suffix on collision) and of the key (`k` + FNV-1a of the hex). The server
+  is never told these ids.
+- The image index stores `{path, bytes, iv, levels}` per image — the same public
+  `keyMap` that `Emage.readMetadata()` exposes, never raw keys.
+- A **coverage scan** runs after `list()`: for every entry whose `bytes` changed
+  (or that is new), the client fetches that image's `X-Emage-Layers: meta`
+  header, at most 4 in flight, and records its `keyMap`. Unchanged entries reuse
+  the cache, so a rescan only touches new or modified images.
+- Coverage is then a pure local join: key `K` unlocks image `I` iff
+  `SHA3-256(IV_I || K)` is a key of `I.levels`. No image packets are downloaded
+  to decide this — only one meta request per changed image.
+- Uploads seed the index directly from the just-encoded stream
+  (`Emage.readMetadata(j2k).keyMap`), so a freshly uploaded image is classified
+  without a round trip. Deletes prune the entry.
+
+The UI mirrors this: the sidebar key-ring card lists each key with its unlock
+count and the paths it opens; each file row carries badges (`plain` = no lookup
+header, `locked` = no ring key fits, otherwise one badge per matching key).
+Clicking a badge activates that key. Thumbnails choose the first ring key that
+unlocks the image in view, falling back to the key in the AES field, so images
+under different keys preview correctly side by side.
 
 ### 8.4 Progressive resolution loading
 
-`_loadResolutions()` fetches the necessary resolution prefix once and reuses it
-for a descending series of reduction values. Smaller display targets reduce
-both transferred bytes and decoding work. A and B in `compare.html` use the
-same bounded target window; the full-resolution baseline C uses a larger window
-when the key permits it.
+`_loadResolutions()` streams the resolution layers one window at a time. The
+first request carries the main headers and the coarsest level only (`0:0`,
+`headers+packets`); every later frame fetches exactly the next level's packets
+(`b:b`, raw `packets`), which the client appends by patching `Psot` and
+restoring EOC (§8.2). Starting at level 0 means no request ever carries a
+cumulative prefix of levels the viewer has not been shown; a codestream prefix
+is inherently cumulative, so batching the first few levels would download
+coarse data that is decoded once and then overwritten. No byte is downloaded
+twice, so a full progressive load transfers exactly the same total as a single
+`0:b` prefix, at the cost of one HTTP request per level. Each window is decoded
+and painted (with a paint yield) before the next is requested, so the viewer
+sees every level as it arrives instead of waiting for the last fetch. A one-shot
+request keeps the single `0:b` fetch. Smaller display targets reduce both transferred
+bytes and decoding work. A and B in `compare.html` use the same bounded target
+window; the full-resolution baseline C uses a larger window when the key
+permits it.
 
 A progressive pass shows coarser frames before the final image and adds CPU work
 relative to one-shot decoding. For a halving pyramid, the pixel counts form
 `1 + 1/4 + 1/16 + …` relative to the final frame, approaching 4/3; this is an
 estimate of sample work rather than a guarantee about total runtime.
 
-Full loading starts at the coarsest level. A reduced target starts up to
-`previewSteps` (default 2) levels earlier. The endpoint is capped by both the
-available packet window and the authenticated key level; inaccessible levels
-produce neither extra decodes nor duplicate frames. One-shot loading performs
-one decode. `decodes` counts real decoder invocations, including a discovery
-decode when an older server supplies no resolution count.
+Every progressive pass starts at the coarsest level and climbs to the target, so
+a reduced target walks through the intervening levels just like a full load
+rather than jumping to the first level the target needs. On the streaming path
+that climb is one window per level; the single-fetch fallback (a keyed image
+with no lookup map, or an older server with no resolution count) decodes the
+same level sequence from the one prefix it already holds. The endpoint is capped
+by both the available packet window and the authenticated key level;
+inaccessible levels produce neither extra decodes nor duplicate frames. One-shot
+loading performs one decode. `decodes` counts real decoder invocations, including
+a discovery decode when an older server supplies no resolution count; on the
+progressive path that probe is the coarsest frame and is reused rather than
+repeated.
 
 `_minResolutionForSize()` rounds up to a reduction whose raster fits the target.
 `_yieldForPaint()` uses two animation frames so progressive frames are actually
 painted rather than coalesced into the final one.
+
+When a `canvas` is supplied, every progressive frame paints into a fixed target
+size (`displayDims`): the requested display dimensions for a size target, or the
+full raster for `'all'`. A coarser frame is therefore upscaled to the same area
+and simply looks blurry, rather than the canvas growing from a thumbnail to the
+full image as levels arrive. The final level matches `displayDims` exactly and so
+paints without any resample; `displaySize` reports the fixed size.
+
+For a size target, `displayDims` is the larger of the requested dimension and the
+raster the decoder's clamp will actually produce. A target finer than the
+coarsest level therefore resolves to the clamped level's native size rather than
+shrinking it to the unreachable target, and a stream with a single resolution
+(no reduction possible) is painted at native size. Only a genuine reduction is
+upscaled, so `displayDims` never scales a decoded frame down.
 
 ---
 
@@ -887,10 +952,12 @@ plaintext image: without per-level keys there is no grant to enforce.
 Server URL/path/password; file picker; **Encode & decode** round trip; download
 the encrypted `.j2k`; load and decrypt an uploaded file. An **`secInput`**
 checkbox selects encrypted vs plaintext encoding and greys out the key/IV inputs
-when cleared. `layerInput` (resolution count); **`accessInput`** (access level,
-`all` default, interpreted as automatic access). Source and destination canvases with a stage label. Gallery:
-refresh listing, open, delete. Upload / **Verify roundtrip** / delete on server.
-A sticky **derived-keys table** on the right (`keysPanel`/`keysBody`/
+when cleared. `layerInput` (resolution count). Source and destination
+canvases with a stage label. A **Random key** button fills the AES field with 32
+random bytes. Server images are browsed as a virtual filesystem (folder
+navigation, per-file thumbnails, refresh/open/delete). Upload and delete act on
+the server. A **key ring & image coverage** card (see §8.3.1) lists saved keys
+with the images each one unlocks and per-file key badges. A sticky **derived-keys table** on the right (`keysPanel`/`keysBody`/
 `copyKeysBtn`) listing one row per level — key, level index, the resolution it
 resolves to, and the key material — with rows inside the current access grant
 highlighted. All intermediate keys appear immediately after encoding, before
@@ -898,8 +965,7 @@ upload, and remain visible outside the highlighted grant. Integrity is not a col
 are not something the user acts on.
 
 ### `downloader.html` — progressive viewer
-Server URL/path and a granted key. `accessInput` is an optional resolution
-limit, blank for automatic key lookup. No IV or key level needs to be entered.
+Server URL/path and a granted key. No IV or key level needs to be entered.
 Breadcrumb file browser.
 Fetch meta; load full; load for a display size (`10vw` etc.). Canvas with stage
 label showing each progressive level. Neither the IV nor the MACs are surfaced:
@@ -977,7 +1043,7 @@ fixes ownership to `$APP_UID`.
 | `test_node.js` | EmageWasm | Polymorphic decode, granular crypto |
 | `test_resolution.js` | EmageWasm | Reduction correctness and clamping |
 | `test_granular.js` | EmageWasm | Pixel-exact access-level matrix |
-| `test_progressive.mjs` | EmageClient | Level selection, ordering, decode counting |
+| `test_progressive.mjs` | EmageClient | Live level selection, ordering, decode counting, incremental requests |
 | `test_granular_keys.mjs` | EmageClient | Public API: chain, clamping, window, keys |
 | `test_mac.js` | EmageWasm | Marker fields, MAC tampering, zone resizing |
 | `test_mac_server.mjs` | EmageClient | MAC survives a live-server window |

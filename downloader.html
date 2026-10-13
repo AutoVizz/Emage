@@ -161,14 +161,9 @@
         <span>AES Key (hex, 32 bytes):</span>
         <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
     </div>
-    <div class="row">
-        <span>Resolution limit (optional, 0 = coarsest; blank = automatic):</span>
-        <input type="number" id="accessInput" placeholder="auto" min="0" style="width:70px">
-    </div>
     <p style="margin:6px 0 0; color:#9a9; font-size:12px;">
-        Enter any granted key and leave the resolution limit blank. Its level
-        is detected automatically and the image loads at the finest resolution
-        that key unlocks. Set a limit only when you want a coarser image.
+        Enter any granted key. Its level is detected automatically and the
+        image loads at the finest resolution that key unlocks.
     </p>
 </div>
 
@@ -228,8 +223,6 @@
         });
         emage.setCrypto({
             key: $('keyInput').value,
-            accessLevel: $('accessInput').value.trim() === '' ? -1
-                : Number($('accessInput').value),
         });
     }
 

@@ -85,8 +85,9 @@ for (let a = 0; a < RES; ++a) {
         return realFetch(url, init);
     };
     try { out = await emage.playAll(); } finally { globalThis.fetch = realFetch; }
-    check(requests.join(',') === `meta,0:${a}`,
-        `automatic K${a} load uses metadata and exactly one bounded packet request`);
+    const expected = 'meta,' + Array.from({ length: a + 1 }, (_, i) => `${i}:${i}`).join(',');
+    check(requests.join(',') === expected,
+        `automatic K${a} load uses metadata and incremental per-level packet requests`);
     check(out.decoded.keyLevel === a && out.decoded.width === Math.ceil(W / 2 ** (RES - 1 - a)),
         `automatic server load with K${a} finds its correct resolution without an access level`);
     check(out.steps.length === a + 1,

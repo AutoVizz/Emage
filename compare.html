@@ -108,18 +108,6 @@
             text-align: right;
         }
 
-        .verdict {
-            font-weight: 600;
-        }
-
-        .verdict.ok {
-            color: #6c6;
-        }
-
-        .verdict.bad {
-            color: #f66;
-        }
-
         .sub {
             color: #888;
             font-size: 12px;
@@ -160,35 +148,30 @@
         </label>
         <span id="imgMeta" class="sub"></span>
     </div>
-    <p class="sub">
-        Blank or <code>all</code> loads every quality layer. A size target (pixels, <code>vw</code>, <code>%</code>)
-        stops the progressive side once it can render at that display size, mirroring the downloader's
-        &quot;Load for size&quot;. The full side always fetches everything.
-    </p>
 </div>
 
     <div class="card">
         <h3>1. Render</h3>
         <div class="side-by-side">
             <div class="side">
-                <h4>A. Progressive resolutions: decode each DWT level, coarsest first</h4>
+                <h4>A. Progressive</h4>
                 <canvas id="cvsProg"></canvas>
                 <div id="progTv" class="tv"></div>
             </div>
             <div class="side">
-                <h4>B. One-shot at the target resolution</h4>
+                <h4>B. One-shot @ target</h4>
                 <canvas id="cvsOnce"></canvas>
                 <div id="onceTv" class="tv"></div>
             </div>
             <div class="side">
-                <h4>C. One-shot at full resolution (baseline)</h4>
+                <h4>C. One-shot full</h4>
                 <canvas id="cvsFull"></canvas>
                 <div id="fullTv" class="tv"></div>
             </div>
         </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="resultsCard" hidden>
         <h3>2. Results</h3>
         <table id="tbl">
             <thead>
@@ -197,34 +180,6 @@
                 <th>A progressive</th>
                 <th>B one-shot @ target</th>
                 <th>C one-shot full</th>
-                <th>verdict</th>
-            </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-        <p class="sub" style="margin: 8px 0 0;">
-            A and B fetch only the resolution packets needed for the target size, capped by the key's
-            access. C fetches through the finest resolution that key unlocks. Smaller targets save both
-            bandwidth and decoding work. Decoding level <i>r</i> means
-            ceil(W&nbsp;/&nbsp;2<sup>NL-r</sup>) square, so the decoder never MQ-decodes the code blocks above
-            <i>r</i> and never runs the high-pass synthesis path on them. A walks from two levels coarser than
-            the target down to it, so its intermediate frames are a quarter the samples of the next one and
-            cost a small multiple of the final decode in total. B decodes only the target level. C is the old
-            behaviour: full resolution regardless of the size target, kept as the baseline. The three runs are
-            sequential, each timed from its own start.
-        </p>
-    </div>
-
-    <div class="card">
-        <h3>3. Column A progressive steps (per resolution level)</h3>
-        <table id="stepsTbl">
-            <thead>
-            <tr>
-                <th>step</th>
-                <th>reduction</th>
-                <th>decoded size</th>
-                <th>sample pixels</th>
-                <th>cumulative ms</th>
             </tr>
             </thead>
             <tbody></tbody>
@@ -278,38 +233,52 @@
         return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
     }
 
-    function setVerdict(cell, ok, text) {
-        cell.className = 'verdict ' + (ok ? 'ok' : 'bad');
-        cell.textContent = text;
+    const resDims = r => `${r.res.decoded.width}×${r.res.decoded.height}`;
+    const resBytes = r => r.res.transferredBytes;
+    const resMs = r => r.ms.toFixed(1) + ' ms';
+    const decodedPixels = r => r.res.steps.reduce((s, x) => s + x.pixels, 0);
+
+    // Build the results table with placeholders so it appears the moment the
+    // run starts; each column is filled in when its pass finishes.
+    function buildResultsTable() {
+        const tbody = $('tbl').querySelector('tbody');
+        tbody.innerHTML = '';
+        const rows = {};
+        const add = (key, label) => {
+            const tr = document.createElement('tr');
+            const th = document.createElement('td');
+            th.textContent = label;
+            tr.appendChild(th);
+            const cells = {};
+            for (const col of ['a', 'b', 'c']) {
+                const td = document.createElement('td');
+                td.className = 'num';
+                td.textContent = '—';
+                tr.appendChild(td);
+                cells[col] = td;
+            }
+            tbody.appendChild(tr);
+            rows[key] = cells;
+        };
+        add('final', 'final image');
+        add('bytes', 'bytes transferred');
+        add('http', 'HTTP requests');
+        add('first', 'time to first frame');
+        add('time', 'total time');
+        return rows;
     }
 
-    function appendRow(metric, a, b, c, ok, verdict) {
-        const tbody = $('tbl').querySelector('tbody');
-        const tr = document.createElement('tr');
-        const mk = (v, num) => {
-            const td = document.createElement('td');
-            if (num) td.className = 'num';
-            td.textContent = String(v);
-            tr.appendChild(td);
-        };
-        mk(metric, false);
-        mk(a, true);
-        mk(b, true);
-        mk(c, true);
-        const td = document.createElement('td');
-        setVerdict(td, ok, verdict);
-        tr.appendChild(td);
-        tbody.appendChild(tr);
+    function fillColumn(rows, col, r) {
+        rows.final[col].textContent = resDims(r);
+        rows.bytes[col].textContent = fmtBytes(resBytes(r));
+        rows.http[col].textContent = String(r.res.httpRequests);
+        rows.time[col].textContent = resMs(r);
     }
 
     $('runBtn').addEventListener('click', runCompare);
 
     async function runCompare() {
         syncConfig();
-        const tbodyA = $('tbl').querySelector('tbody');
-        const tbodyS = $('stepsTbl').querySelector('tbody');
-        tbodyA.innerHTML = '';
-        tbodyS.innerHTML = '';
         for (const c of [cvsProg, cvsOnce, cvsFull]) c.width = c.height = 0;
         $('progTv').textContent = '';
         $('onceTv').textContent = '';
@@ -318,7 +287,8 @@
 
         const stepMs = [];
         const sizeTarget = $('sizeInput').value.trim();
-        const sizeLimited = !(sizeTarget === '' || sizeTarget === 'all' || sizeTarget === '100%');
+        const rows = buildResultsTable();
+        $('resultsCard').hidden = false;
 
         // Each column selects its packet window for its requested resolution.
         // Each pass is
@@ -330,12 +300,13 @@
                 ...opts,
                 canvas,
                 onLayer: (st) => {
-                    stepMs.push(performance.now() - t0);
+                    const elapsed = performance.now() - t0;
+                    stepMs.push(elapsed);
                     tv.textContent = st.complete
                         ? `Final ${st.width}×${st.height}`
                         : `Level ${st.layer}/${st.totalLayers}: ${st.width}×${st.height}`;
                     status(`${label}: decoded ${st.width}×${st.height} ` +
-                        `(reduction ${st.reduction}) at ${(performance.now() - t0).toFixed(0)} ms`);
+                        `(reduction ${st.reduction}) at ${elapsed.toFixed(0)} ms`);
                 },
             };
             const res = await emage.display(target, pass);
@@ -346,10 +317,14 @@
         try {
             status('A. Progressive resolutions (decode each DWT level)...');
             a = await runPass(cvsProg, $('progTv'), 'A', sizeTarget, {});
+            rows.first.a.textContent = stepMs.length ? stepMs[0].toFixed(1) + ' ms' : '—';
+            fillColumn(rows, 'a', a);
             status(`A done in ${a.ms.toFixed(1)} ms. B. One-shot at the target resolution...`);
             b = await runPass(cvsOnce, $('onceTv'), 'B', sizeTarget, { progressive: false });
+            fillColumn(rows, 'b', b);
             status(`B done in ${b.ms.toFixed(1)} ms. C. One-shot at full resolution...`);
             c = await runPass(cvsFull, $('fullTv'), 'C', 'all', { progressive: false });
+            fillColumn(rows, 'c', c);
         } catch (err) {
             status('load failed: ' + fmtErr(err));
             return;
@@ -370,59 +345,16 @@
             `${b.res.numResolutions} resolutions, ` +
             `${meta.bytes} bytes, ${prot}`;
 
-        // ---- metrics -------------------------------------------------------
-        const pixels = r => r.res.steps.reduce((s, x) => s + x.pixels, 0);
-        const bytes = r => r.res.transferredBytes;
-        const dims = r => `${r.res.decoded.width}×${r.res.decoded.height}`;
-        const ms = v => v.toFixed(1) + ' ms';
-        const aFirst = stepMs.length ? stepMs[0] : null;
-
-        appendRow('final image', dims(a), dims(b), dims(c), true,
-            sizeLimited ? 'A and B stop at the target, C ignores it' : 'all at full resolution');
-        appendRow('resolution level', a.res.reduction, b.res.reduction, c.res.reduction, true,
-            'DWT halvings from full resolution');
-        appendRow('decoder runs', a.res.decodes, b.res.decodes, c.res.decodes,
-            true, 'one MQ + DWT pass per level decoded');
-        appendRow('sample pixels decoded', fmtBytes(pixels(a)), fmtBytes(pixels(b)), fmtBytes(pixels(c)),
-            true, 'cumulative across the column\'s steps');
-        appendRow('bytes transferred', fmtBytes(bytes(a)), fmtBytes(bytes(b)), fmtBytes(bytes(c)),
-            true, 'image bytes only; smaller targets use smaller windows');
-        appendRow('HTTP requests', a.res.httpRequests, b.res.httpRequests, c.res.httpRequests,
-            true, 'metadata plus the required packet window');
-        appendRow('time to first frame', aFirst == null ? '—' : ms(aFirst), '—', '—', true,
-            'only A shows intermediate frames');
-        appendRow('total time', ms(a.ms), ms(b.ms), ms(c.ms), true,
-            'sequential passes, each from its own t0');
-        appendRow('resolution levels available', a.res.numResolutions, b.res.numResolutions,
-            c.res.numResolutions, true, 'DWT decomposition levels, reported by the server');
-
-
-        // ---- per-step detail (column A) -------------------------------------
-        const aSteps = a.res.steps;
-        for (let i = 0; i < aSteps.length; ++i) {
-            const s = aSteps[i];
-            const tr = document.createElement('tr');
-            for (const text of [String(s.layer), String(s.reduction),
-                `${s.width}×${s.height}`, fmtBytes(s.pixels),
-                (stepMs[i] ?? 0).toFixed(1) + ' ms']) {
-                const td = document.createElement('td');
-                td.className = 'num';
-                td.textContent = text;
-                tr.appendChild(td);
-            }
-            tbodyS.appendChild(tr);
-        }
-
         const foot = (r, tv) => {
-            tv.textContent = `final ${dims(r)} @ reduction ${r.res.reduction} ` +
-                `(${r.res.steps.length} decode, ${fmtBytes(pixels(r))} px, ${r.ms.toFixed(1)} ms)`;
+            tv.textContent = `final ${resDims(r)} @ reduction ${r.res.reduction} ` +
+                `(${r.res.steps.length} decode, ${fmtBytes(decodedPixels(r))} px, ${r.ms.toFixed(1)} ms)`;
         };
         foot(a, $('progTv'));
         foot(b, $('onceTv'));
         foot(c, $('fullTv'));
 
         status(`Done. A ${a.ms.toFixed(0)} ms / B ${b.ms.toFixed(0)} ms / C ${c.ms.toFixed(0)} ms. ` +
-            `Decoded ${fmtBytes(pixels(a))} / ${fmtBytes(pixels(b))} / ${fmtBytes(pixels(c))} sample pixels.`);
+            `Decoded ${fmtBytes(decodedPixels(a))} / ${fmtBytes(decodedPixels(b))} / ${fmtBytes(decodedPixels(c))} sample pixels.`);
     }
 
 </script>

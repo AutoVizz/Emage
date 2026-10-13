@@ -854,13 +854,171 @@ setCrypto(config = {}) {
         return out;
     }
 
+    async _loadResolutions(reduction, opts = {}, meta) {
+        if (!meta) meta = await this.meta();
+        const progressive = opts.progressive !== false;
+        const rawKey = opts.key ?? this.crypto.key;
+        const hasKey = rawKey != null && rawKey.length;
+        const map = meta.metadata?.keyMap;
+        if (!progressive || (hasKey && !map)) {
+            return this._loadResolutionsOnce(reduction, opts, meta);
+        }
+        return this._loadResolutionsProgressive(reduction, opts, meta, { rawKey, map });
+    }
+
+    async _loadResolutionsProgressive(reduction, opts, meta, { rawKey, map }) {
+        const ceiling = this._accessLevel(opts.accessLevel ?? opts.levels ?? this.crypto.accessLevel ?? -1);
+        let keyLevel = Number.POSITIVE_INFINITY;
+        if (map) {
+            if (!map.levels || typeof map.levels !== 'object' || Array.isArray(map.levels)) {
+                throw new EmageError('Invalid key lookup metadata');
+            }
+            const tag = this.keyLookupTag(rawKey, map.iv);
+            const kl = Object.hasOwn(map.levels, tag) ? map.levels[tag] : null;
+            if (!Number.isInteger(kl) || kl < 0) {
+                throw new EmageError('Key does not match the image lookup metadata');
+            }
+            keyLevel = kl;
+        }
+
+        let numResolutions = meta.layers || meta.numResolutions || 0;
+        let buffer = null;
+        let psot = -1;
+        let fetched = -1;
+        let transferred = 0;
+        let requests = 0;
+        let probe = null;
+        if (!numResolutions) {
+            const first = await this._fetchWindow('0:0');
+            buffer = first.bytes;
+            psot = first.psotOffsets.length === 1 ? first.psotOffsets[0] : -1;
+            fetched = 0;
+            transferred = buffer.length;
+            requests = 1;
+            if (Number.isFinite(keyLevel)) buffer.expectedKeyLevel = keyLevel;
+            probe = this.decode(buffer, { ...opts, accessLevel: 0, reduction: 31 });
+            numResolutions = probe.numResolutions || 0;
+        }
+        if (!numResolutions) {
+            throw new EmageError('Cannot determine the resolution count for a progressive download');
+        }
+
+        const requested = Math.max(0, Math.trunc(reduction) || 0);
+        const maxReduction = numResolutions - 1;
+        let end = Math.min(requested, maxReduction);
+        const grant = ceiling < 0 ? keyLevel : Math.min(keyLevel, ceiling);
+        if (Number.isFinite(grant)) end = Math.max(end, numResolutions - 1 - grant);
+        // Always climb from the coarsest level so every frame is fetched one
+        // level at a time; a cumulative first window would download levels the
+        // viewer never sees.
+        const start = Math.max(maxReduction, end);
+
+        const steps = [];
+        let decodes = probe ? 1 : 0;
+        let probeUsed = false;
+        for (let r = start; r >= end; --r) {
+            const level = numResolutions - 1 - r;
+            // Fetch this level's packets before decoding and painting it, so
+            // each frame is shown as soon as its window arrives instead of
+            // after the whole prefix has been downloaded.
+            if (level > fetched) {
+                if (fetched < 0) {
+                    const result = await this._fetchWindow('0:' + level);
+                    buffer = result.bytes;
+                    if (result.psotOffsets.length !== 1) {
+                        throw new EmageError('Resolution windowing needs a single tile-part');
+                    }
+                    psot = result.psotOffsets[0];
+                    transferred += buffer.length;
+                    ++requests;
+                } else {
+                    const rest = await this._fetchWindow((fetched + 1) + ':' + level);
+                    const prefix = buffer;
+                    if (prefix.length < 2 || prefix[prefix.length - 2] !== 0xff || prefix[prefix.length - 1] !== 0xd9) {
+                        throw new EmageError('Codestream window is missing EOC');
+                    }
+                    if (!Number.isInteger(psot) || psot < 6 || psot + 4 > prefix.length - 2) {
+                        throw new EmageError('Invalid tile framing offset');
+                    }
+                    const combined = new Uint8Array(prefix.length + rest.bytes.length);
+                    combined.set(prefix.subarray(0, prefix.length - 2));
+                    combined.set(rest.bytes, prefix.length - 2);
+                    combined.set([0xff, 0xd9], combined.length - 2);
+                    const view = new DataView(combined.buffer);
+                    view.setUint32(psot, view.getUint32(psot) + rest.bytes.length);
+                    buffer = combined;
+                    transferred += rest.bytes.length;
+                    ++requests;
+                }
+                fetched = level;
+            }
+
+            let decoded;
+            if (!probeUsed && probe && probe.reduction === r) {
+                decoded = probe;
+                probeUsed = true;
+            } else {
+                if (Number.isFinite(keyLevel)) buffer.expectedKeyLevel = keyLevel;
+                decoded = this.decode(buffer, { ...opts, accessLevel: level, reduction: r });
+                ++decodes;
+            }
+            const isLast = r === end;
+            if (opts.canvas) this.paintTo(opts.canvas, decoded, opts.displayDims);
+            const st = {
+                layer: steps.length + 1,
+                totalLayers: start - end + 1,
+                reduction: decoded.reduction != null ? decoded.reduction : r,
+                complete: isLast,
+                assembledBytes: buffer.length,
+                appendedBytes: 0,
+                pixels: decoded.width * decoded.height,
+                width: decoded.width,
+                height: decoded.height,
+                decoded,
+            };
+            steps.push(st);
+            if (typeof opts.onLayer === 'function') {
+                opts.onLayer({
+                    layer: st.layer,
+                    totalLayers: st.totalLayers,
+                    complete: st.complete,
+                    assembledBytes: buffer.length,
+                    reduction: st.reduction,
+                    width: decoded.width,
+                    height: decoded.height,
+                });
+            }
+            if (opts.canvas && !isLast) await this._yieldForPaint();
+        }
+
+        const last = steps[steps.length - 1];
+        const stream = buffer || null;
+        if (stream) {
+            stream.availableLevel = numResolutions - 1 - end;
+            stream.packetRequests = requests;
+            stream.transferredBytes = transferred;
+        }
+        return {
+            meta,
+            steps,
+            decoded: last.decoded,
+            stream,
+            reduction: last.reduction,
+            numResolutions: numResolutions || last.decoded.numResolutions || 0,
+            transferredBytes: transferred,
+            httpRequests: 1 + requests,
+            decodes,
+            complete: true,
+        };
+    }
+
     // Decode the codestream at a descending series of DWT resolution levels.
     //
     // Fetch only the needed prefix of resolution packets, then reuse it for
     // each progressive decode. A reduced target saves bandwidth and decoding
     // work. Progressive frames add work relative to one-shot decoding, while
     // giving the viewer a coarse image before the final frame.
-    async _loadResolutions(reduction, opts = {}, meta) {
+    async _loadResolutionsOnce(reduction, opts = {}, meta) {
         if (!meta) meta = await this.meta();
         const stream = await this._stream({ ...opts, reduction, meta });
         if (stream.availableLevel >= 0) opts = { ...opts, accessLevel: stream.availableLevel };
@@ -892,25 +1050,15 @@ setCrypto(config = {}) {
         // codestream whose only valid reduction is 0.
         const maxReduction = numResolutions > 0 ? numResolutions - 1 : Infinity;
         let end = Math.min(requested, maxReduction);
-        const early = Math.max(0, Math.trunc(opts.previewSteps ?? 2));
+        // Climb from the coarsest level so the frames match the streaming path.
         let start = end;
-        if (progressive) {
-            start = !Number.isFinite(maxReduction) ? end + early
-                // Climbing to full resolution is the classic progressive
-                // experience, so start at the coarsest level. For a reduced
-                // target, start a few levels early instead, skipping the ones
-                // the target does not need.
-                : end === 0 ? maxReduction
-                : Math.min(end + early, maxReduction);
-        }
+        if (progressive && Number.isFinite(maxReduction)) start = maxReduction;
 
         const steps = [];
         // Count real decoder invocations, not frames. A discovery decode is
         // counted whether or not its level is reused, so the figure stays honest.
         // Reuse only happens when the probe's level is the one the loop starts
-        // at; widening the sequence to include it just to save the decode would
-        // paint a frame smaller than previewSteps asked for, so the probe can
-        // legitimately go unused.
+        // at, which is the coarsest level and so always the first frame here.
         let decodes = probe ? 1 : 0;
         let probeUsed = false;
         for (let r = start; r >= end; --r) {
@@ -1013,13 +1161,34 @@ setCrypto(config = {}) {
             const fullW = meta.width || 0;
             const fullH = meta.height || 0;
             const fullDim = Math.max(fullW, fullH);
-            if (fullW && fullH && fullDim > targetDim) {
-                const scale = targetDim / fullDim;
-                displayDims = {
-                    width: Math.max(1, Math.round(fullW * scale)),
-                    height: Math.max(1, Math.round(fullH * scale)),
-                };
+            // The decoder clamps the reduction to the codestream's
+            // decomposition count, so a target finer than the coarsest level
+            // still decodes at that level. Pin the canvas to whichever is
+            // larger -- the requested display size, or the raster the clamp
+            // will actually produce -- so a reduced frame is upscaled to the
+            // target but a clamped frame is never shrunk below its real
+            // resolution. A stream that cannot reduce has no displayDims and
+            // paints at native size.
+            const maxReduction = meta.layers ? meta.layers - 1 : reduction;
+            const effectiveReduction = Math.min(reduction, maxReduction);
+            if (fullW && fullH && effectiveReduction > 0) {
+                const decodedDim = fullDim / 2 ** effectiveReduction;
+                const chosenDim = Math.max(targetDim, decodedDim);
+                if (chosenDim < fullDim) {
+                    const scale = chosenDim / fullDim;
+                    displayDims = {
+                        width: Math.max(1, Math.round(fullW * scale)),
+                        height: Math.max(1, Math.round(fullH * scale)),
+                    };
+                }
             }
+        } else if (meta.width && meta.height) {
+            // Progressive full load: pin the canvas to the final raster so each
+            // coarser frame fills the same area (upscaled, blurry) instead of
+            // growing the canvas from a thumbnail to the full image as levels
+            // arrive. The last level matches these dimensions exactly, so it
+            // paints without any resample.
+            displayDims = { width: meta.width, height: meta.height };
         }
         // Resolution selection limits the pixels we decode; paint into the
         // requested display dimensions so arbitrary sizes (for example 200px)
