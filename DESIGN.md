@@ -797,6 +797,12 @@ Encoding uses the finest/master key, while decoding accepts any granted key.
 `resolveTarget()` accepts `200`, `'100px'`, `'10vw'`, `'30vh'`, `'50%'`,
 `'all'`, `'100%'`.
 
+`meta()`, `preview()`, `playAll()` and `display()` accept an `imagePath`
+option that overrides `server.imagePath` for that call. Concurrent readers (for
+example the uploader's thumbnail grid, which renders every row at once) must use
+it rather than mutating the shared `server.imagePath`, which would otherwise
+race and make several rows resolve to the same last-set path.
+
 ### 8.3 Metadata lookup and bounded downloads
 
 For a new encrypted image, `display()`, `preview()` and `playAll()`:
@@ -844,9 +850,9 @@ It keeps a **key ring** (saved AES-256 keys, `localStorage: emage.keyring.v1`)
 and an **image index** (`localStorage: emage.images.v1`) mapping each server
 image to the public lookup header it carries.
 
-- Identity is a local hash of the path (`p` + 64-bit FNV-1a of the path, with a
-  `~n` suffix on collision) and of the key (`k` + FNV-1a of the hex). The server
-  is never told these ids.
+- Image identity is a local SHA3-256 hash of the path (`p` + `SHA3-256(path)` hex,
+  with a `~n` suffix on collision); a ring key is identified by the key hex itself.
+  The server is never told these ids.
 - The image index stores `{path, bytes, iv, levels}` per image — the same public
   `keyMap` that `Emage.readMetadata()` exposes, never raw keys.
 - A **coverage scan** runs after `list()`: for every entry whose `bytes` changed
@@ -860,8 +866,9 @@ image to the public lookup header it carries.
   (`Emage.readMetadata(j2k).keyMap`), so a freshly uploaded image is classified
   without a round trip. Deletes prune the entry.
 
-The UI mirrors this: the sidebar key-ring card lists each key with its unlock
-count and the paths it opens; each file row carries badges (`plain` = no lookup
+The UI mirrors this: the sidebar key-ring card lists each key's label, its
+AES-256 abbreviated to first 8 bytes … last 8 bytes (full key on hover), its
+unlock count and the paths it opens; each file row carries badges (`plain` = no lookup
 header, `locked` = no ring key fits, otherwise one badge per matching key).
 Clicking a badge activates that key. Thumbnails choose the first ring key that
 unlocks the image in view, falling back to the key in the AES field, so images
@@ -928,6 +935,12 @@ upscaled, so `displayDims` never scales a decoded frame down.
 
 Three standalone HTML pages, no build, sharing `emage.js`.
 
+The only external code is `vendor/noble-sha3.js` — the MIT-licensed
+`@noble/hashes` `sha3_256` (vendored verbatim, bundled by esm.sh). The uploader
+uses it for local identity hashes (§8.3.1); everything crypto on the wire still
+goes through the WASM modules. This was adopted after discovering `SubtleCrypto`
+`SHA3-256` is unsupported in Firefox.
+
 ### Plaintext codestreams
 
 Encryption is opt-out. `encodePixelData()` takes `enableSec` (default `true`);
@@ -951,12 +964,14 @@ plaintext image: without per-level keys there is no grant to enforce.
 ### `uploader.html` — encrypt & upload
 Server URL/path/password; file picker; **Encode & decode** round trip; download
 the encrypted `.j2k`; load and decrypt an uploaded file. An **`secInput`**
-checkbox selects encrypted vs plaintext encoding and greys out the key/IV inputs
-when cleared. `layerInput` (resolution count). Source and destination
+checkbox selects encrypted vs plaintext encoding and greys out the key input
+when cleared. `layerInput` (resolution count; blank by default, meaning the
+maximum the image allows, and clamped to the per-image range). Source and destination
 canvases with a stage label. A **Random key** button fills the AES field with 32
 random bytes. Server images are browsed as a virtual filesystem (folder
-navigation, per-file thumbnails, refresh/open/delete). Upload and delete act on
-the server. A **key ring & image coverage** card (see §8.3.1) lists saved keys
+navigation, per-file thumbnails, refresh/open/delete), with **Upload current
+J2K** alongside so upload and delete both act on the browsed listing. A **key
+ring & image coverage** card (see §8.3.1) lists saved keys
 with the images each one unlocks and per-file key badges. A sticky **derived-keys table** on the right (`keysPanel`/`keysBody`/
 `copyKeysBtn`) listing one row per level — key, level index, the resolution it
 resolves to, and the key material — with rows inside the current access grant

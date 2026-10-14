@@ -374,9 +374,9 @@ setCrypto(config = {}) {
         return Emage.messageOf(err);
     }
 
-    _imageUrl() {
+    _imageUrl(imagePath) {
         const base = String(this.server.baseUrl || '').replace(/\/+$/, '');
-        return base + '/image/' + this.server.imagePath;
+        return base + '/image/' + (imagePath != null ? imagePath : this.server.imagePath);
     }
 
     keyLookupTag(key, iv) {
@@ -648,8 +648,8 @@ setCrypto(config = {}) {
         return this.encodePixelData(imageData.data, canvas.width, canvas.height, opts);
     }
 
-    async _fetchWindow(spec) {
-        const resp = await fetch(this._imageUrl(), { headers: { 'X-Emage-Layers': spec } });
+    async _fetchWindow(spec, imagePath) {
+        const resp = await fetch(this._imageUrl(imagePath), { headers: { 'X-Emage-Layers': spec } });
         const body = await resp.arrayBuffer();
         if (!resp.ok) {
             let text = '';
@@ -672,7 +672,8 @@ setCrypto(config = {}) {
     async _stream(opts = {}) {
         const ceiling = this._accessLevel(opts.accessLevel ?? opts.levels ?? this.crypto.accessLevel ?? -1);
         const reduction = Math.max(0, Math.trunc(opts.reduction) || 0);
-        const meta = opts.meta || await this.meta();
+        const imagePath = opts.imagePath;
+        const meta = opts.meta || await this.meta(opts);
         let total = meta.layers || meta.numResolutions || 0;
         const rawKey = opts.key ?? this.crypto.key;
         const map = meta.metadata?.keyMap;
@@ -687,7 +688,7 @@ setCrypto(config = {}) {
             }
             let last = Math.min(keyLevel, Math.max(0, total - 1 - reduction));
             if (ceiling >= 0) last = Math.min(last, ceiling);
-            const result = await this._fetchWindow('0:' + last);
+            const result = await this._fetchWindow('0:' + last, imagePath);
             result.bytes.availableLevel = last;
             result.bytes.expectedKeyLevel = keyLevel;
             return result.bytes;
@@ -695,15 +696,15 @@ setCrypto(config = {}) {
         if (!rawKey || !rawKey.length) {
             const last = total ? Math.max(0, total - 1 - reduction) : -1;
             const limit = ceiling < 0 ? last : last < 0 ? ceiling : Math.min(ceiling, last);
-            const result = await this._fetchWindow(limit < 0 || limit === total - 1 ? 'all' : '0:' + limit);
+            const result = await this._fetchWindow(limit < 0 || limit === total - 1 ? 'all' : '0:' + limit, imagePath);
             result.bytes.availableLevel = limit;
             return result.bytes;
         }
-        const coarse = await this._fetchWindow('0:0');
+        const coarse = await this._fetchWindow('0:0', imagePath);
         const keyLevel = this._identifyKeyLevel(coarse.bytes, rawKey);
         const zones = this.describeSecurityZone(coarse.bytes);
         total = zones.hasSec ? zones.zoneCount : total || coarse.total;
-        if (!total) total = (await this.meta()).layers;
+        if (!total) total = (await this.meta(opts)).layers;
         if (!total) throw new EmageError('Cannot determine the resolution count for a partial download');
         let last = Math.max(0, total - 1 - reduction);
         if (keyLevel >= 0) last = Math.min(last, keyLevel);
@@ -715,13 +716,13 @@ setCrypto(config = {}) {
         // Emage's encrypted streams use one tile. For other codestreams,
         // request the needed prefix with its own framing instead of guessing.
         if (coarse.psotOffsets.length !== 1) {
-            const result = await this._fetchWindow('0:' + last);
+            const result = await this._fetchWindow('0:' + last, imagePath);
             result.bytes.availableLevel = last;
             result.bytes.packetRequests = 2;
             result.bytes.transferredBytes += coarse.bytes.length;
             return result.bytes;
         }
-        const rest = await this._fetchWindow('1:' + last);
+        const rest = await this._fetchWindow('1:' + last, imagePath);
         const prefix = coarse.bytes;
         if (prefix.length < 2 || prefix[prefix.length - 2] !== 0xff || prefix[prefix.length - 1] !== 0xd9) {
             throw new EmageError('Coarsest window is missing EOC');
@@ -742,8 +743,8 @@ setCrypto(config = {}) {
         return combined;
     }
 
-    async meta() {
-        const resp = await fetch(this._imageUrl(), { headers: { 'X-Emage-Layers': 'meta' } });
+    async meta(opts = {}) {
+        const resp = await fetch(this._imageUrl(opts.imagePath), { headers: { 'X-Emage-Layers': 'meta' } });
         const data = await parseJson(resp);
         if (!resp.ok) {
             throw new EmageServerError('HTTP ' + resp.status + ' ' + JSON.stringify(data));
@@ -855,7 +856,7 @@ setCrypto(config = {}) {
     }
 
     async _loadResolutions(reduction, opts = {}, meta) {
-        if (!meta) meta = await this.meta();
+        if (!meta) meta = await this.meta(opts);
         const progressive = opts.progressive !== false;
         const rawKey = opts.key ?? this.crypto.key;
         const hasKey = rawKey != null && rawKey.length;
@@ -889,7 +890,7 @@ setCrypto(config = {}) {
         let requests = 0;
         let probe = null;
         if (!numResolutions) {
-            const first = await this._fetchWindow('0:0');
+            const first = await this._fetchWindow('0:0', opts.imagePath);
             buffer = first.bytes;
             psot = first.psotOffsets.length === 1 ? first.psotOffsets[0] : -1;
             fetched = 0;
@@ -923,7 +924,7 @@ setCrypto(config = {}) {
             // after the whole prefix has been downloaded.
             if (level > fetched) {
                 if (fetched < 0) {
-                    const result = await this._fetchWindow('0:' + level);
+                    const result = await this._fetchWindow('0:' + level, opts.imagePath);
                     buffer = result.bytes;
                     if (result.psotOffsets.length !== 1) {
                         throw new EmageError('Resolution windowing needs a single tile-part');
@@ -932,7 +933,7 @@ setCrypto(config = {}) {
                     transferred += buffer.length;
                     ++requests;
                 } else {
-                    const rest = await this._fetchWindow((fetched + 1) + ':' + level);
+                    const rest = await this._fetchWindow((fetched + 1) + ':' + level, opts.imagePath);
                     const prefix = buffer;
                     if (prefix.length < 2 || prefix[prefix.length - 2] !== 0xff || prefix[prefix.length - 1] !== 0xd9) {
                         throw new EmageError('Codestream window is missing EOC');
@@ -1019,7 +1020,7 @@ setCrypto(config = {}) {
     // work. Progressive frames add work relative to one-shot decoding, while
     // giving the viewer a coarse image before the final frame.
     async _loadResolutionsOnce(reduction, opts = {}, meta) {
-        if (!meta) meta = await this.meta();
+        if (!meta) meta = await this.meta(opts);
         const stream = await this._stream({ ...opts, reduction, meta });
         if (stream.availableLevel >= 0) opts = { ...opts, accessLevel: stream.availableLevel };
         const progressive = opts.progressive !== false;
@@ -1132,7 +1133,7 @@ setCrypto(config = {}) {
     // Fetch the codestream and decode the coarsest resolution level that still
     // carries a usable thumbnail.
     async preview(opts = {}) {
-        const meta = await this.meta();
+        const meta = await this.meta(opts);
         const reduction = this._minResolutionForSize(opts.thumbSize ?? 160, meta);
         const out = await this._loadResolutions(reduction, { ...opts, progressive: false }, meta);
         return { ...out, kind: 'preview' };
@@ -1149,7 +1150,7 @@ setCrypto(config = {}) {
     // target: px number, '100px', '10vw', '30vh', '50%', or 'all'/'100%'.
     async display(target, opts = {}) {
         const spec = resolveTarget(target);
-        const meta = await this.meta();
+        const meta = await this.meta(opts);
         let targetDim = null;
         let reduction = 0;
         let displayDims = null;

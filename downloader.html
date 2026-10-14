@@ -147,12 +147,6 @@
             <input type="text" id="imgPath" value="encrypted.j2k" size="22">
         </label>
     </div>
-    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
-        Read-side requests need no upload password. Leave the base URL empty to call the API
-        same-origin (e.g. when this page is served by the Emage server itself). Cross-origin fetches
-        from another port/scheme are subject to browser CORS; the layer-window API currently sends no
-        CORS headers.
-    </p>
 </div>
 
 <div class="card">
@@ -161,10 +155,6 @@
         <span>AES Key (hex, 32 bytes):</span>
         <input type="text" id="keyInput" value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" size="42">
     </div>
-    <p style="margin:6px 0 0; color:#9a9; font-size:12px;">
-        Enter any granted key. Its level is detected automatically and the
-        image loads at the finest resolution that key unlocks.
-    </p>
 </div>
 
 <div class="card">
@@ -174,11 +164,6 @@
         <span id="fsCrumbs" class="fs-crumbs"></span>
     </div>
     <div id="fsView" class="fs-view"><div class="fs-row fs-empty">- awaiting listing: press &quot;Refresh listing&quot; -</div></div>
-    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
-        Image paths are shown like files under a virtual root. Folders are derived from the path
-        components, so <code>sub/dir/photo.j2k</code> appears in <code>sub/dir/</code>. Click a folder
-        to descend; click a file to prepare it for loading, or double-click to start a progressive load.
-    </p>
 </div>
 
 <div class="card">

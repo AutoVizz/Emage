@@ -137,9 +137,6 @@
                    value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
                    size="46">
         </label>
-        <label>AES IV (hex, 16 bytes)
-            <input type="text" id="ivInput" value="000102030405060708090a0b0c0d0e0f" size="36">
-        </label>
     </div>
     <div class="row">
         <button id="runBtn" disabled>Run comparison</button>
@@ -211,7 +208,7 @@
             baseUrl: $('serverUrl').value,
             imagePath: $('imgPath').value,
         });
-        emage.setCrypto({ key: $('keyInput').value, iv: $('ivInput').value });
+        emage.setCrypto({ key: $('keyInput').value });
     }
 
     Emage.init({ wasmBase: './cmake-build-wasm/' })

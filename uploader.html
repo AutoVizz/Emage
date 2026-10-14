@@ -337,11 +337,6 @@
             <input type="password" id="pwInput" size="18" value="vanilaIceCream(Totally)">
         </label>
     </div>
-    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
-        Leave the base URL empty to call the API same-origin (e.g. when this page is served by the
-        Emage server itself). Cross-origin fetches from another port/scheme are subject to browser CORS;
-        the layer-window API currently sends no CORS headers.
-    </p>
 </div>
 
 <div class="card">
@@ -367,8 +362,9 @@
     </div>
     <div class="row">
         <span>J2K resolutions (DWT levels):</span>
-        <input type="number" id="layerInput" value="6" min="1" max="64" style="width:70px"
-               title="Max depends on image size — updates automatically when you pick an image">
+        <input type="number" id="layerInput" min="1" max="64" style="width:70px"
+               placeholder="max"
+               title="Leave blank for the maximum the image allows — updates automatically when you pick an image">
         <span id="layerRange" style="font-size:12px; color:#8cf;">1–64</span>
     </div>
     <div style="display:flex; gap:20px; flex-wrap:wrap;">
@@ -390,28 +386,11 @@
         <button id="galleryBtn">Refresh listing</button>
         <button id="gOpenBtn" disabled>Open selected</button>
         <button id="gDelBtn" disabled>Delete selected</button>
+        <button id="upBtn" disabled>Upload current J2K</button>
         <span id="fsCrumbs" class="fs-crumbs"></span>
         <span id="gCount" style="font-size:12px;color:#aaa;"></span>
     </div>
     <div id="fsView" class="fs-view"></div>
-    <p style="font-size: 12px; margin: 4px 0 0; color: #aaa;">
-        Image paths are shown like files under a virtual root. Folders are derived from the path
-        components, so <code>sub/dir/photo.j2k</code> appears in <code>sub/dir/</code>. Click a folder
-        to descend; click a file to select it (fills the image path); double-click to load it
-        into the pipeline. Thumbnails pick the first ring key that unlocks each image,
-        falling back to the AES key/IV above. The badges beside a file name list which
-        saved keys decrypt it (<span class="key-badge plain">plain</span> = no lookup
-        header, <span class="key-badge locked">locked</span> = no ring key fits); click a
-        badge to make that key active.
-    </p>
-</div>
-
-<div class="card">
-    <h3>3. Server actions</h3>
-    <div class="row">
-        <button id="upBtn" disabled>Upload current J2K</button>
-        <button id="delBtn" disabled>Delete on server</button>
-    </div>
     <div id="status"></div>
 </div>
 
@@ -420,16 +399,6 @@
 <aside class="col-side">
     <div class="card" id="keysPanel">
         <h3>Granular progressive keys</h3>
-        <p style="margin:0 0 8px; color:#9a9; font-size:12px;">
-            One key per DWT resolution level, coarse-first. Level 0 is the coarsest
-            approximation. The master key is the finest key; K(m−1) = SHA3-256(Km).
-            Hand a recipient K<em>a</em> and they derive the coarser keys to decode the
-            image at that resolution and no finer — the levels above stay encrypted.
-            Every level also carries a cumulative MAC, verified automatically on
-            every decode, so a tampered or moved zone is rejected rather than
-            decoded into a plausible-looking image. Keys are derived in the
-            browser and never sent to the server.
-        </p>
         <table class="keys-table">
             <thead>
             <tr>
@@ -442,9 +411,7 @@
             <tbody id="keysBody"></tbody>
         </table>
         <div class="keys-empty" id="keysEmpty">
-            No keys yet. Encode an image with encryption enabled to show the
-            full chain immediately. Highlighted rows are the keys your current
-            access level holds; all intermediate keys remain visible.
+            No keys yet.
         </div>
         <div class="row" style="margin-top:8px;">
             <button id="copyKeysBtn" disabled>Copy all keys</button>
@@ -453,14 +420,6 @@
 
     <div class="card" id="keyringPanel">
         <h3>Key ring &amp; image coverage</h3>
-        <p style="margin:0 0 8px; color:#9a9; font-size:12px;">
-            Every saved key is tested against every image on the server without
-            downloading any image data: each encrypted image carries a lookup
-            header mapping <code>SHA3-256(IV ‖ K)</code> to a resolution level,
-            so a local hash comparison tells you which images a key opens. The
-            map is cached in this browser and only re-scanned when an image
-            changes.
-        </p>
         <div class="row">
             <input type="text" id="krLabel" placeholder="key label" size="12">
             <button id="krAddBtn" class="btn-mini">Add current key</button>
@@ -478,6 +437,7 @@
 
 <script type="module">
     import { Emage, EmageError } from './emage.js';
+    import { sha3_256 } from './vendor/noble-sha3.js';
 
     let emage = null;
 
@@ -568,7 +528,6 @@
             syncConfig();
             syncSecInputs();
             $('processBtn').disabled = false;
-            $('delBtn').disabled = false;
             drawDefaultPattern();
             keyRing = loadKeys();
             imageCrypto = loadImageIndex();
@@ -712,26 +671,21 @@
         }
     }
 
-    async function onDelete() {
-        try {
-            syncConfig();
-            const path = emage.server.imagePath;
-            const data = await emage.remove();
-            forgetImage(path);
-            status(`deleted ${data.deleted}`);
-        } catch (err) {
-            status('delete error: ' + fmtErr(err));
-        }
-    }
-
     // ---------------------------------------------------------------------
     // Local pipeline (PNG → encode → decode)
     // ---------------------------------------------------------------------
+
+    // Highest DWT level count the image can carry: one per halving down to a
+    // single pixel, capped at the SEC zone limit (one protected zone per level).
+    const maxLevelsFor = (width, height) =>
+        Math.min(64, Math.floor(Math.log2(Math.min(width, height))) + 1);
 
     const clampToRange = (input) => {
         const min = parseInt(input.min, 10);
         const max = parseInt(input.max, 10);
         input.addEventListener('change', () => {
+            // Blank means "use the maximum for the selected image".
+            if (input.value.trim() === '') return;
             const v = parseInt(input.value, 10);
             if (Number.isNaN(v) || v < min) input.value = min;
             else if (v > max) input.value = max;
@@ -748,10 +702,11 @@
             srcCanvas.height = img.height;
             const ctx = srcCanvas.getContext('2d');
             ctx.drawImage(img, 0, 0);
-            const maxLevels = Math.min(64, Math.floor(Math.log2(Math.min(img.width, img.height))) + 1);
+            const maxLevels = maxLevelsFor(img.width, img.height);
             const layerInput = $('layerInput');
             layerInput.max = maxLevels;
-            layerInput.value = Math.min(parseInt(layerInput.value, 10) || 6, maxLevels);
+            const typed = parseInt(layerInput.value, 10);
+            if (!Number.isNaN(typed)) layerInput.value = Math.min(typed, maxLevels);
             $('layerRange').textContent = `1–${maxLevels}`;
             status(`Loaded image: ${img.width}x${img.height}`);
         };
@@ -793,7 +748,6 @@
 
     $('upBtn').addEventListener('click', onUpload);
     $('copyKeysBtn').addEventListener('click', onCopyKeys);
-    $('delBtn').addEventListener('click', onDelete);
 
     // ---------------------------------------------------------------------
     // Server image browser (virtual filesystem + thumbnails)
@@ -815,19 +769,12 @@
     let keyCoverage = {};
     let activeKeyId = null;
 
-    function fnv1aHex(str) {
-        let h1 = 0x811c9dc5;
-        let h2 = 0x1000193;
-        for (let i = 0; i < str.length; ++i) {
-            const c = str.charCodeAt(i);
-            h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-            h2 = Math.imul(h2 ^ c, 0x85ebca6b) >>> 0;
-        }
-        return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+    function sha3Hex(str) {
+        const bytes = new TextEncoder().encode(String(str));
+        return [...sha3_256(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
     }
 
-    function imageHash(path) { return 'p' + fnv1aHex(String(path)); }
-    function keyHash(hex) { return 'k' + fnv1aHex(String(hex).toLowerCase()); }
+    function imageHash(path) { return 'p' + sha3Hex(path); }
 
     function readStore(key, fallback) {
         try {
@@ -896,7 +843,7 @@
         if (!Array.isArray(arr)) return [];
         return arr.filter((k) => k && typeof k.key === 'string' && /^[0-9a-fA-F]{64}$/.test(k.key))
             .map((k) => ({
-                id: k.id || keyHash(k.key),
+                id: k.key.toLowerCase(),
                 label: typeof k.label === 'string' ? k.label : '',
                 key: k.key.toLowerCase(),
             }));
@@ -1010,18 +957,18 @@
             status('Key ring: enter a 64-hex-digit AES-256 key first.');
             return;
         }
-        const id = keyHash(hex);
+        const id = hex.toLowerCase();
         if (keyRing.some((k) => k.id === id)) {
             setActiveKey(id);
-            status(`Key ${id} is already in the ring.`);
+            status('That key is already in the ring.');
             return;
         }
         const label = $('krLabel').value.trim();
-        keyRing.push({ id, label: label || ('key ' + keyRing.length), key: hex.toLowerCase() });
+        keyRing.push({ id, label: label || ('key ' + keyRing.length), key: id });
         saveKeys();
         $('krLabel').value = '';
         setActiveKey(id);
-        status(`Added key ${id} to the ring.`);
+        status(`Added ${label || 'key'} to the ring.`);
     }
 
     function removeKey(id) {
@@ -1045,12 +992,12 @@
 
             const label = document.createElement('span');
             label.className = 'kr-label';
-            label.textContent = k.label || k.id;
+            label.textContent = k.label;
             head.appendChild(label);
 
             const fp = document.createElement('span');
             fp.className = 'kr-fp';
-            fp.textContent = k.id;
+            fp.textContent = k.key.slice(0, 16) + '\u2026' + k.key.slice(-16);
             fp.title = k.key;
             head.appendChild(fp);
 
@@ -1079,7 +1026,8 @@
             if (unlocked.length) {
                 const imgs = document.createElement('div');
                 imgs.className = 'kr-imgs';
-                for (const id of unlocked.sort()) {
+                for (const id of unlocked.sort((a, b) =>
+                    imageCrypto[a].path.localeCompare(imageCrypto[b].path))) {
                     const p = document.createElement('span');
                     p.className = 'kr-img';
                     p.textContent = imageCrypto[id].path;
@@ -1159,8 +1107,9 @@
             const k = keyRing.find((x) => x.id === kid);
             const b = document.createElement('span');
             b.className = 'key-badge';
-            b.textContent = k ? (k.label || kid) : kid;
-            b.title = 'decryptable with ' + (k ? `${k.label} (${kid})` : kid) + ' — click to activate';
+            b.textContent = k ? (k.label || k.key.slice(0, 8)) : '?';
+            b.title = 'decryptable with ' + (k ? `${k.label || 'a ring key'} (${k.key})` : 'a ring key') +
+                ' — click to activate';
             b.addEventListener('click', (e) => { e.stopPropagation(); setActiveKey(kid); });
             wrap.appendChild(b);
         }
@@ -1170,9 +1119,12 @@
     function renderThumb(img, row) {
         const box = row.querySelector('.fs-thumb');
         box.innerHTML = '<span class="g-placeholder">\u2026</span>';
-        emage.server.imagePath = img.path;
         const canvas = document.createElement('canvas');
-        const opts = { progressive: false, canvas };
+        // Pass the path explicitly: every thumbnail renders concurrently, so
+        // they must not race on the shared emage.server.imagePath. Without this
+        // each display() re-reads the mutable path after its awaits and several
+        // rows end up showing the same (last) image.
+        const opts = { progressive: false, canvas, imagePath: img.path };
         const key = unlockKeyFor(img.path);
         if (key) opts.key = key;
         emage.display(THUMB_SIZE, opts).then((out) => {
@@ -1288,7 +1240,14 @@
         }
         if (tick !== galleryTick) return;
         fsTable = list.map((img) => ({ ...img, comps: img.path.split('/').filter(Boolean) }));
-        fsCwd = [];
+        // Keep the current directory across reloads (uploads and deletes happen
+        // in place), trimming back only to the deepest segment that still has
+        // entries so a deleted folder falls back to its parent.
+        while (fsCwd.length &&
+               !fsTable.some((img) => img.comps.length > fsCwd.length &&
+                                      fsCwd.every((d, i) => img.comps[i] === d))) {
+            fsCwd.pop();
+        }
         $('gCount').textContent = fsTable.length + (fsTable.length === 1 ? ' image' : ' images');
         if (fsTable.length) status(`Scanning ${fsTable.length} image(s) for key coverage…`);
         await scanCoverage(list, tick);
@@ -1341,7 +1300,8 @@
             if ($('secInput').checked && !newIv()) return;
             syncConfig();
             emage.encodeCanvas(srcCanvas, {
-                numResolutions: parseInt($('layerInput').value, 10),
+                // Blank input means "max levels for this image".
+                numResolutions: parseInt($('layerInput').value, 10) || maxLevelsFor(width, height),
                 // Unchecked: a plaintext codestream with no SEC marker. The
                 // server stores and serves it identically, and the key/iv
                 // inputs are ignored.
