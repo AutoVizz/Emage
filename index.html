@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emage Uploader</title>
+<script src="js/theme.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="assets/emage-transparent.ico" type="image/x-icon">
+</head>
+<body>
+<div class="page"><div class="shell">
+<aside id="side" data-active="upload"></aside>
+<main class="main">
+<header class="head"><div class="workspace-heading"><h1>Encrypt &amp; upload</h1><label class="theme-control">Theme<select data-theme-select aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
+<p class="lede">Turn a PNG or JPG into a progressive JPEG 2000 image, with every resolution level sealed under its own key.</p></header>
+
+<section class="card bar" aria-label="Server connection">
+<div class="stack"><label class="lbl" for="serverUrl">Server URL</label><input id="serverUrl" class="field mono" value="http://localhost:3233"></div>
+<div class="stack"><label class="lbl" for="imgPath">Image path</label><input id="imgPath" class="field mono" value="" placeholder="folder/image.j2k"></div>
+<div class="stack"><label class="lbl" for="pwInput">Password <span>· upload &amp; delete</span></label><input id="pwInput" class="field" type="password" placeholder="Server upload password" autocomplete="off"></div>
+</section>
+
+<div class="cols">
+<div class="col">
+<section class="card" style="gap:22px">
+<div class="title"><span class="step">1</span><div><h2>Local pipeline</h2><p>PNG or JPG to encrypted JPEG 2000, all in your browser.</p></div></div>
+<div class="drops">
+<label class="drop" for="fileInput"><input id="fileInput" class="sr" type="file" accept="image/*"><span class="tile green"><i data-i="image" data-s="20"></i></span><span style="min-width:0"><b>Source image</b><small id="fileName" class="mono">Choose a PNG or JPG</small></span></label>
+<label class="drop" for="j2kInput"><input id="j2kInput" class="sr" type="file" accept=".j2k,.j2c"><span class="tile"><i data-i="up" data-s="20"></i></span><span style="min-width:0"><b>Existing codestream</b><small id="j2kName">Load a .j2k or .j2c file</small></span></label>
+</div>
+<div class="opts">
+<div class="full"><label class="sw"><input id="enc" type="checkbox" class="sr" checked><span class="track" aria-hidden="true"><span class="knob"></span></span>Encrypt each resolution level</label><span id="encNote" class="sub"></span></div>
+<div class="stack" id="keyWrap"><label class="lbl" for="keyInput">Master key <span>· AES-256, hex</span></label>
+<div class="pair"><input id="keyInput" class="field mono" style="font-size:12px;min-width:0" value="" placeholder="64 hex digits; blank for plaintext"><button id="keyGenBtn" class="btn icon" type="button" aria-label="Generate random key"><i data-i="dice" data-s="18"></i></button></div></div>
+<div class="stack"><label class="lbl" for="layerInput">Resolution levels</label>
+<div class="pair" style="align-items:center"><input id="layerInput" class="field" type="number" min="1" max="64" value="6" placeholder="Max" style="max-width:110px"><span class="sub"><span id="layerHint">Choose a source image. Blank uses its maximum.</span></span></div></div>
+</div>
+<div class="wrap">
+<button id="processBtn" class="btn primary" type="button"><i data-i="play"></i>Encode &amp; decode</button>
+<button id="decodeBtn" class="btn" type="button"><i data-i="unlock"></i>Decode loaded file</button>
+<button id="downloadBtn" class="btn" type="button"><i data-i="down"></i>Download .j2k</button>
+<button id="upBtn" class="btn" type="button"><i data-i="up"></i>Upload to server</button>
+</div>
+<div class="two">
+<figure><div class="cap">Original<span id="sourceSize" class="mono">No source image</span></div><div class="scene preview"><canvas id="srcCanvas" width="0" height="0" aria-label="Original image preview"></canvas><span id="sourceEmpty">Choose a source image</span></div></figure>
+<figure><div class="cap">Decoded<span id="stageLabel" class="pill">No decoded image</span></div><div class="scene preview"><canvas id="dstCanvas" width="0" height="0" aria-label="Decoded image preview"></canvas><span id="decodedEmpty">Encode or open an image</span></div></figure>
+</div>
+</section>
+
+<section class="card">
+<div class="between"><div class="title"><span class="step">2</span><div><h2>Server images</h2><p>Browse what is stored, and which of your keys can open it.</p></div></div>
+<button id="galleryBtn" class="btn" type="button"><i data-i="refresh"></i>Refresh listing</button></div>
+<div class="crumbs"><span class="mono"><span style="color:var(--mute)">server</span> / <b data-cwd>/</b></span><b id="count" style="font-size:12px;color:var(--mute)"></b></div>
+<div id="fsView" class="list" role="listbox" aria-label="Server images"></div>
+<div class="actions"><button id="openBtn" class="btn" type="button"><i data-i="open"></i>Open selected</button><button id="delBtn" class="btn danger" type="button"><i data-i="trash"></i>Delete selected</button></div>
+</section>
+
+<div id="status" class="status" role="status"><i></i><span class="mono">Loading WebAssembly codecs…</span></div>
+</div>
+
+<aside class="col-side">
+<section class="card">
+<div><h2 style="font-size:18px;font-weight:700">Progressive keys</h2><p class="sub">Holding a key unlocks its level and every coarser one, never a finer one.</p></div>
+<div id="keysBody" class="stack" style="gap:10px"></div>
+<button id="copyKeysBtn" class="btn primary" type="button"><i data-i="copy"></i>Copy all keys</button>
+</section>
+<section class="card">
+<div><h2 style="font-size:18px;font-weight:700">Key ring</h2><p class="sub">Keys saved on this device. Matched against server images by their public lookup tags.</p></div>
+<div class="stack"><label class="lbl" for="krLabel">Label for current key</label>
+<div class="pair"><input id="krLabel" class="field" style="font-size:14px;min-width:0" placeholder="e.g. Archive key"><button id="krAddBtn" class="btn icon primary" type="button" aria-label="Add current key"><i data-i="plus" data-s="18"></i></button><button id="krScanBtn" class="btn icon" type="button" aria-label="Rescan server images"><i data-i="refresh"></i></button></div></div>
+<div id="krList" class="stack" style="gap:12px"></div>
+<p id="krEmpty" class="empty" hidden>No saved keys yet.</p>
+</section>
+</aside>
+</div>
+</main>
+</div></div>
+<script type="module" src="js/uploader.js"></script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Emage engineering notes: local setup, progressive packet delivery, resolution keys, and reproducible loading experiments.">
+  <title>Emage documentation and engineering notes</title>
+  <script src="js/theme.js"></script>
+  <link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/blog.css">
+  <link rel="icon" href="assets/emage-transparent.ico" type="image/x-icon">
+</head>
+<body>
+<header class="masthead"><a class="site-brand" href="index.html"><img src="assets/emage-logo.png" width="32" height="32" alt="">Emage</a><span>/ Engineering notes</span><nav aria-label="Site navigation"><a href="blog.html">Interactive article</a><a href="downloader.html">Image viewer</a><label class="theme-control">Theme<select data-theme-select aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav></header>
+<main><article>
+  <header class="post-header">
+    <h1>Documentation and engineering notes</h1>
+    <p class="standfirst">How to run Emage, how progressive delivery works, and how a key determines the detail a reader can reconstruct.</p>
+    <p class="byline">Emage project notes · <time datetime="2026-10-17">17 October 2026</time></p>
+  </header>
+  <section class="prose" id="start"><h2>Start with an image</h2>
+    <p>Emage stores one JPEG 2000 codestream and serves windows of its spatial resolution pyramid. The browser can decode a coarse image before downloading the finer detail. Each resolution zone can also be encrypted under a different key, so a recipient's key sets the maximum resolution they can reconstruct.</p>
+    <p>The <a href="blog.html">interactive project article</a> puts those ideas next to working examples: three loading strategies, ten concurrent images, local inspection of downloaded levels, and owner/reader views of the same ciphertext. Start there to see the behavior, or follow the setup guide to run it yourself.</p>
+  </section>
+  <section class="prose" id="guides"><h2>The articles</h2>
+    <ol class="applications">
+      <li><a href="running-locally.html"><strong>Running Emage locally</strong></a><br>Start the API and client, locate the WASM bundles, run the article proxy, and diagnose upload authentication and occupied ports.</li>
+      <li><a href="protocol.html"><strong>From packet windows to decoded frames</strong></a><br>Follow an image from a small preview to a detailed view, reusing what has already arrived.</li>
+      <li><a href="resolution-keys.html"><strong>Resolution keys and authenticated grants</strong></a><br>Understand the hash chain, preview access, integrity checks, and what a coarse grant can and cannot do.</li>
+      <li><a href="experiment-methodology.html"><strong>How the loading experiments are measured</strong></a><br>Read the bandwidth profiles, concurrency design, timing definitions, PNG transfer calculations, and limits of the comparison.</li>
+    </ol>
+  </section>
+  <section class="prose" id="implementation"><h2>How the parts fit together</h2>
+    <p>These articles describe the current repository. In this documentation, a “layer” means a spatial resolution level, with L0 the coarsest. It does not mean a JPEG 2000 quality layer. The encoder currently uses one quality layer.</p>
+    <p>The sender prepares an image, the server stores and delivers its parts, and the reader decrypts and displays the view its key permits. The storage server does not receive image keys.</p>
+    <p>The <a href="protocol.html">protocol article</a> explains how a preview gains detail. The <a href="resolution-keys.html">resolution-key article</a> covers authentication and the limits of a grant. For commands and checks, use the <a href="running-locally.html">local setup guide</a>; for timing definitions and bandwidth calculations, see the <a href="experiment-methodology.html">experiment methodology</a>.</p>
+  </section>
+  <footer class="article-footer"><p><a href="blog.html">Open the interactive article</a> · <a href="running-locally.html">Next: running locally</a></p></footer>
+</article></main>
+</body>
+</html>

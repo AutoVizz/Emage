@@ -1,359 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Emage — Comparison: progressive vs full load</title>
-    <style>
-        body {
-            font-family: sans-serif;
-            margin: 20px;
-            background: #1a1a1a;
-            color: #eee;
-        }
-
-        h2 {
-            margin-top: 0;
-        }
-
-        .card {
-            background: #2a2a2a;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-        }
-
-        .card h3 {
-            margin-top: 0;
-        }
-
-        canvas {
-            background: #000;
-            border: 1px solid #444;
-            display: block;
-            max-width: 100%;
-            margin: 6px auto 0;
-        }
-
-        .row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-
-        input, button {
-            padding: 8px 12px;
-            margin-bottom: 4px;
-        }
-
-        button {
-            cursor: pointer;
-        }
-
-        button:disabled {
-            cursor: not-allowed;
-            opacity: .5;
-        }
-
-        #status {
-            color: #8cf;
-            font-family: monospace;
-            font-size: 13px;
-            margin-top: 8px;
-        }
-
-        .side-by-side {
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-        }
-
-        .side {
-            flex: 1 1 260px;
-            min-width: 240px;
-        }
-
-        .side h4 {
-            margin: 4px 0 0;
-            color: #aaa;
-        }
-
-        .side .tv {
-            color: #8cf;
-            font-family: monospace;
-            font-size: 12px;
-            margin-top: 4px;
-            min-height: 1.2em;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: monospace;
-            font-size: 13px;
-        }
-
-        th, td {
-            text-align: left;
-            border: 1px solid #444;
-            padding: 4px 8px;
-        }
-
-        th {
-            background: #333;
-        }
-
-        td.num {
-            text-align: right;
-        }
-
-        .sub {
-            color: #888;
-            font-size: 12px;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emage Compare</title>
+<script src="js/theme.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="assets/emage-transparent.ico" type="image/x-icon">
 </head>
 <body>
+<div class="page"><div class="shell">
+<aside id="side" data-active="compare"></aside>
+<main class="main">
+<header class="head"><div class="workspace-heading"><h1>Compare strategies</h1><label class="theme-control">Theme<select data-theme-select aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
+<p class="lede">Load the same image three ways and see what each one costs in bytes, requests and waiting time.</p></header>
 
-<h2>Emage — transfer strategy comparison</h2>
-<p style="font-size: 13px; color: #aaa; margin: 0 0 12px;">
-    <a href="uploader.html">Uploader</a> ·
-    <a href="downloader.html">Progressive downloader</a> ·
-    <a href="compare.html">Comparison</a>
-</p>
-
-<div class="card">
-    <h3>0. Server connection</h3>
-    <div class="row">
-        <label>Server base URL
-            <input type="text" id="serverUrl" value="http://localhost:3233" size="30">
-        </label>
-        <label>Image path
-            <input type="text" id="imgPath" value="encrypted.j2k" size="22">
-        </label>
-        <label>AES Key (hex, 32 bytes)
-            <input type="text" id="keyInput"
-                   value="000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-                   size="46">
-        </label>
-    </div>
-    <div class="row">
-        <button id="runBtn" disabled>Run comparison</button>
-        <label>Progressive display size
-            <input type="text" id="sizeInput" size="9" placeholder="e.g. 200, 10vw, all">
-        </label>
-        <span id="imgMeta" class="sub"></span>
-    </div>
+<section class="card" aria-label="Run setup" style="gap:20px">
+<div class="card bar" style="padding:0">
+<div class="stack"><label class="lbl" for="serverUrl">Server URL</label><input id="serverUrl" class="field mono" value="http://localhost:3233"></div>
+<div class="stack"><label class="lbl" for="imgPath">Image path</label><input id="imgPath" class="field mono" value="" placeholder="folder/image.j2k"></div>
+<div class="stack"><label class="lbl" for="sizeInput">Display size <span>· progressive target</span></label><input id="sizeInput" class="field mono" value="200" placeholder="200, 10vw"></div>
 </div>
+<div class="stack"><label class="lbl" for="keyInput">Decryption key <span>· AES-256, hex</span></label><input id="keyInput" class="field mono" style="font-size:12px" value="" placeholder="64 hex digits; blank for plaintext"></div>
+<div class="between"><div id="imgMeta" class="wrap" style="gap:8px"><span class="pill">Run a comparison to inspect this image</span></div>
+<button id="runBtn" class="btn primary" type="button">Run comparison</button></div>
+</section>
 
-    <div class="card">
-        <h3>1. Render</h3>
-        <div class="side-by-side">
-            <div class="side">
-                <h4>A. Progressive</h4>
-                <canvas id="cvsProg"></canvas>
-                <div id="progTv" class="tv"></div>
-            </div>
-            <div class="side">
-                <h4>B. One-shot @ target</h4>
-                <canvas id="cvsOnce"></canvas>
-                <div id="onceTv" class="tv"></div>
-            </div>
-            <div class="side">
-                <h4>C. One-shot full</h4>
-                <canvas id="cvsFull"></canvas>
-                <div id="fullTv" class="tv"></div>
-            </div>
-        </div>
-    </div>
+<section class="stack" style="gap:16px"><div class="title"><span class="step">1</span><h2>Render</h2></div><div id="panels" class="panels"></div></section>
 
-    <div class="card" id="resultsCard" hidden>
-        <h3>2. Results</h3>
-        <table id="tbl">
-            <thead>
-            <tr>
-                <th>metric</th>
-                <th>A progressive</th>
-                <th>B one-shot @ target</th>
-                <th>C one-shot full</th>
-            </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-    </div>
+<section class="card">
+<div class="between"><div class="title"><span class="step">2</span><h2>Results</h2></div><span class="sub">Shorter bars are better. The best value in each row is marked.</span></div>
+<div class="scroll"><div id="tbl" class="tbl" role="table" aria-label="Strategy comparison"></div></div>
+</section>
 
-<div id="status"></div>
-
-<script type="module">
-    import { Emage, EmageError } from './emage.js';
-
-    let emage = null;
-
-    const $ = id => document.getElementById(id);
-    const cvsProg = $('cvsProg');
-    const cvsOnce = $('cvsOnce');
-    const cvsFull = $('cvsFull');
-
-    function status(msg) {
-        $('status').textContent = msg;
-    }
-
-    function fmtErr(err) {
-        return err instanceof EmageError ? err.message : Emage.messageOf(err);
-    }
-
-    function syncConfig() {
-        emage.setServer({
-            baseUrl: $('serverUrl').value,
-            imagePath: $('imgPath').value,
-        });
-        emage.setCrypto({ key: $('keyInput').value });
-    }
-
-    Emage.init({ wasmBase: './cmake-build-wasm/' })
-        .then((m) => {
-            emage = m;
-            syncConfig();
-            $('runBtn').disabled = false;
-            status('Ready. Pick an image and run the comparison.');
-        })
-        .catch((err) => {
-            status('Failed to load WASM modules: ' + fmtErr(err));
-        });
-
-    function fmtBytes(n) {
-        if (!Number.isFinite(n)) return '?';
-        const units = ['B', 'KB', 'MB', 'GB'];
-        let i = 0, v = n;
-        while (v >= 1024 && i < units.length - 1) { v /= 1024; ++i; }
-        return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
-    }
-
-    const resDims = r => `${r.res.decoded.width}×${r.res.decoded.height}`;
-    const resBytes = r => r.res.transferredBytes;
-    const resMs = r => r.ms.toFixed(1) + ' ms';
-    const decodedPixels = r => r.res.steps.reduce((s, x) => s + x.pixels, 0);
-
-    // Build the results table with placeholders so it appears the moment the
-    // run starts; each column is filled in when its pass finishes.
-    function buildResultsTable() {
-        const tbody = $('tbl').querySelector('tbody');
-        tbody.innerHTML = '';
-        const rows = {};
-        const add = (key, label) => {
-            const tr = document.createElement('tr');
-            const th = document.createElement('td');
-            th.textContent = label;
-            tr.appendChild(th);
-            const cells = {};
-            for (const col of ['a', 'b', 'c']) {
-                const td = document.createElement('td');
-                td.className = 'num';
-                td.textContent = '—';
-                tr.appendChild(td);
-                cells[col] = td;
-            }
-            tbody.appendChild(tr);
-            rows[key] = cells;
-        };
-        add('final', 'final image');
-        add('bytes', 'bytes transferred');
-        add('http', 'HTTP requests');
-        add('first', 'time to first frame');
-        add('time', 'total time');
-        return rows;
-    }
-
-    function fillColumn(rows, col, r) {
-        rows.final[col].textContent = resDims(r);
-        rows.bytes[col].textContent = fmtBytes(resBytes(r));
-        rows.http[col].textContent = String(r.res.httpRequests);
-        rows.time[col].textContent = resMs(r);
-    }
-
-    $('runBtn').addEventListener('click', runCompare);
-
-    async function runCompare() {
-        syncConfig();
-        for (const c of [cvsProg, cvsOnce, cvsFull]) c.width = c.height = 0;
-        $('progTv').textContent = '';
-        $('onceTv').textContent = '';
-        $('fullTv').textContent = '';
-        $('imgMeta').textContent = '';
-
-        const stepMs = [];
-        const sizeTarget = $('sizeInput').value.trim();
-        const rows = buildResultsTable();
-        $('resultsCard').hidden = false;
-
-        // Each column selects its packet window for its requested resolution.
-        // Each pass is
-        // timed from its own start and runs strictly after the previous one, so
-        // no column shares bandwidth or main-thread time with another.
-        const runPass = async (canvas, tv, label, target, opts) => {
-            const t0 = performance.now();
-            const pass = {
-                ...opts,
-                canvas,
-                onLayer: (st) => {
-                    const elapsed = performance.now() - t0;
-                    stepMs.push(elapsed);
-                    tv.textContent = st.complete
-                        ? `Final ${st.width}×${st.height}`
-                        : `Level ${st.layer}/${st.totalLayers}: ${st.width}×${st.height}`;
-                    status(`${label}: decoded ${st.width}×${st.height} ` +
-                        `(reduction ${st.reduction}) at ${elapsed.toFixed(0)} ms`);
-                },
-            };
-            const res = await emage.display(target, pass);
-            return { res, ms: performance.now() - t0 };
-        };
-
-        let a, b, c;
-        try {
-            status('A. Progressive resolutions (decode each DWT level)...');
-            a = await runPass(cvsProg, $('progTv'), 'A', sizeTarget, {});
-            rows.first.a.textContent = stepMs.length ? stepMs[0].toFixed(1) + ' ms' : '—';
-            fillColumn(rows, 'a', a);
-            status(`A done in ${a.ms.toFixed(1)} ms. B. One-shot at the target resolution...`);
-            b = await runPass(cvsOnce, $('onceTv'), 'B', sizeTarget, { progressive: false });
-            fillColumn(rows, 'b', b);
-            status(`B done in ${b.ms.toFixed(1)} ms. C. One-shot at full resolution...`);
-            c = await runPass(cvsFull, $('fullTv'), 'C', 'all', { progressive: false });
-            fillColumn(rows, 'c', c);
-        } catch (err) {
-            status('load failed: ' + fmtErr(err));
-            return;
-        }
-
-        const meta = b.res.meta;
-        // Protection is reported from the fetched codestream itself, so the line
-        // is accurate for a plaintext image as well as an encrypted one.
-        let prot = 'protection unknown';
-        try {
-            const z = emage.describeSecurityZone(b.res.stream);
-            prot = z.hasSec
-                ? `encrypted, ${z.zoneCount} per-resolution zones`
-                : 'plaintext, no SEC marker';
-        } catch (_) { /* keep the unknown label */ }
-        $('imgMeta').textContent =
-            `${meta.width}x${meta.height}, ${meta.layers} layers, ` +
-            `${b.res.numResolutions} resolutions, ` +
-            `${meta.bytes} bytes, ${prot}`;
-
-        const foot = (r, tv) => {
-            tv.textContent = `final ${resDims(r)} @ reduction ${r.res.reduction} ` +
-                `(${r.res.steps.length} decode, ${fmtBytes(decodedPixels(r))} px, ${r.ms.toFixed(1)} ms)`;
-        };
-        foot(a, $('progTv'));
-        foot(b, $('onceTv'));
-        foot(c, $('fullTv'));
-
-        status(`Done. A ${a.ms.toFixed(0)} ms / B ${b.ms.toFixed(0)} ms / C ${c.ms.toFixed(0)} ms. ` +
-            `Decoded ${fmtBytes(decodedPixels(a))} / ${fmtBytes(decodedPixels(b))} / ${fmtBytes(decodedPixels(c))} sample pixels.`);
-    }
-
-</script>
+<div id="status" class="status" role="status"><i></i><span class="mono">Loading WebAssembly codecs…</span></div>
+</main>
+</div></div>
+<script type="module" src="js/compare.js"></script>
 </body>
 </html>

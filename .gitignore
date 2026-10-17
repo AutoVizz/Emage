@@ -1,2 +1,7 @@
 # Published WASM bundles (copied here by EmageWasm's CMake post-build step)
 cmake-build-wasm/
+node_modules/
+__pycache__/
+
+# Portable editorial handoff (generated archive)
+/emage-blog-rewrite-context.tar.gz

@@ -1,0 +1,8 @@
+Tool: built-in imagegen
+Source: supplied base (1).ico, largest frame decoded as PNG without altering its pixels
+Production outputs: emage-logo.png (256px PNG), emage-transparent.ico (16–64px favicon)
+Generated master: emage-logo-transparent.png
+Transparent background: true
+
+Prompt:
+Use case: background-extraction. Edit target: the attached existing Emage purple wizard-hat logo. Remove ONLY the solid white background, including the small white opening beneath the floppy tip, to create true transparent alpha. Preserve this exact original pixel-art mark: same purple hat silhouette, folds, mustard brown band, edges, original pixel blocks, colors and proportions. No redesign, no new illustration, no text, no added effects, no shadows or backdrop. The output is a small website brand mark and favicon. Center the original complete hat with a compact, even transparent margin, with no part cropped. The canvas background must be fully transparent, not a checkerboard or white. Preserve recognizable original details when scaled to 32px.

@@ -3,6 +3,10 @@
 const MAX_RESOLUTIONS = 64;
 const METADATA_PREFIX = 'EMAGE-META\0';
 
+function checkAbort(signal) {
+    if (signal?.aborted) throw signal.reason || new DOMException('Operation aborted', 'AbortError');
+}
+
 function mainHeaderSegments(bytes) {
     if (bytes[0] !== 0xff || bytes[1] !== 0x4f) throw new EmageError('Missing SOC');
     const segments = [];
@@ -648,9 +652,11 @@ setCrypto(config = {}) {
         return this.encodePixelData(imageData.data, canvas.width, canvas.height, opts);
     }
 
-    async _fetchWindow(spec, imagePath) {
-        const resp = await fetch(this._imageUrl(imagePath), { headers: { 'X-Emage-Layers': spec } });
+    async _fetchWindow(spec, imagePath, signal) {
+        checkAbort(signal);
+        const resp = await fetch(this._imageUrl(imagePath), { headers: { 'X-Emage-Layers': spec }, signal });
         const body = await resp.arrayBuffer();
+        checkAbort(signal);
         if (!resp.ok) {
             let text = '';
             try { text = new TextDecoder().decode(body); } catch (_) { /* ignore */ }
@@ -688,7 +694,7 @@ setCrypto(config = {}) {
             }
             let last = Math.min(keyLevel, Math.max(0, total - 1 - reduction));
             if (ceiling >= 0) last = Math.min(last, ceiling);
-            const result = await this._fetchWindow('0:' + last, imagePath);
+            const result = await this._fetchWindow('0:' + last, imagePath, opts.signal);
             result.bytes.availableLevel = last;
             result.bytes.expectedKeyLevel = keyLevel;
             return result.bytes;
@@ -696,11 +702,11 @@ setCrypto(config = {}) {
         if (!rawKey || !rawKey.length) {
             const last = total ? Math.max(0, total - 1 - reduction) : -1;
             const limit = ceiling < 0 ? last : last < 0 ? ceiling : Math.min(ceiling, last);
-            const result = await this._fetchWindow(limit < 0 || limit === total - 1 ? 'all' : '0:' + limit, imagePath);
+            const result = await this._fetchWindow(limit < 0 || limit === total - 1 ? 'all' : '0:' + limit, imagePath, opts.signal);
             result.bytes.availableLevel = limit;
             return result.bytes;
         }
-        const coarse = await this._fetchWindow('0:0', imagePath);
+        const coarse = await this._fetchWindow('0:0', imagePath, opts.signal);
         const keyLevel = this._identifyKeyLevel(coarse.bytes, rawKey);
         const zones = this.describeSecurityZone(coarse.bytes);
         total = zones.hasSec ? zones.zoneCount : total || coarse.total;
@@ -716,13 +722,13 @@ setCrypto(config = {}) {
         // Emage's encrypted streams use one tile. For other codestreams,
         // request the needed prefix with its own framing instead of guessing.
         if (coarse.psotOffsets.length !== 1) {
-            const result = await this._fetchWindow('0:' + last, imagePath);
+            const result = await this._fetchWindow('0:' + last, imagePath, opts.signal);
             result.bytes.availableLevel = last;
             result.bytes.packetRequests = 2;
             result.bytes.transferredBytes += coarse.bytes.length;
             return result.bytes;
         }
-        const rest = await this._fetchWindow('1:' + last, imagePath);
+        const rest = await this._fetchWindow('1:' + last, imagePath, opts.signal);
         const prefix = coarse.bytes;
         if (prefix.length < 2 || prefix[prefix.length - 2] !== 0xff || prefix[prefix.length - 1] !== 0xd9) {
             throw new EmageError('Coarsest window is missing EOC');
@@ -744,8 +750,10 @@ setCrypto(config = {}) {
     }
 
     async meta(opts = {}) {
-        const resp = await fetch(this._imageUrl(opts.imagePath), { headers: { 'X-Emage-Layers': 'meta' } });
+        checkAbort(opts.signal);
+        const resp = await fetch(this._imageUrl(opts.imagePath), { headers: { 'X-Emage-Layers': 'meta' }, signal: opts.signal });
         const data = await parseJson(resp);
+        checkAbort(opts.signal);
         if (!resp.ok) {
             throw new EmageServerError('HTTP ' + resp.status + ' ' + JSON.stringify(data));
         }
@@ -797,6 +805,11 @@ setCrypto(config = {}) {
             },
             body: data,
         });
+        if (resp.status === 401) {
+            throw new EmageServerError(
+                'Upload unauthorized (HTTP 401): check the Password field. ' +
+                'It must match the upload password configured on the server.');
+        }
         const out = await parseJson(resp);
         if (!resp.ok) {
             throw new EmageServerError('HTTP ' + resp.status + ' ' + JSON.stringify(out));
@@ -890,7 +903,7 @@ setCrypto(config = {}) {
         let requests = 0;
         let probe = null;
         if (!numResolutions) {
-            const first = await this._fetchWindow('0:0', opts.imagePath);
+            const first = await this._fetchWindow('0:0', opts.imagePath, opts.signal);
             buffer = first.bytes;
             psot = first.psotOffsets.length === 1 ? first.psotOffsets[0] : -1;
             fetched = 0;
@@ -918,13 +931,14 @@ setCrypto(config = {}) {
         let decodes = probe ? 1 : 0;
         let probeUsed = false;
         for (let r = start; r >= end; --r) {
+            checkAbort(opts.signal);
             const level = numResolutions - 1 - r;
             // Fetch this level's packets before decoding and painting it, so
             // each frame is shown as soon as its window arrives instead of
             // after the whole prefix has been downloaded.
             if (level > fetched) {
                 if (fetched < 0) {
-                    const result = await this._fetchWindow('0:' + level, opts.imagePath);
+                    const result = await this._fetchWindow('0:' + level, opts.imagePath, opts.signal);
                     buffer = result.bytes;
                     if (result.psotOffsets.length !== 1) {
                         throw new EmageError('Resolution windowing needs a single tile-part');
@@ -933,7 +947,7 @@ setCrypto(config = {}) {
                     transferred += buffer.length;
                     ++requests;
                 } else {
-                    const rest = await this._fetchWindow((fetched + 1) + ':' + level, opts.imagePath);
+                    const rest = await this._fetchWindow((fetched + 1) + ':' + level, opts.imagePath, opts.signal);
                     const prefix = buffer;
                     if (prefix.length < 2 || prefix[prefix.length - 2] !== 0xff || prefix[prefix.length - 1] !== 0xd9) {
                         throw new EmageError('Codestream window is missing EOC');
@@ -989,7 +1003,8 @@ setCrypto(config = {}) {
                     height: decoded.height,
                 });
             }
-            if (opts.canvas && !isLast) await this._yieldForPaint();
+            checkAbort(opts.signal);
+            if (opts.canvas && !isLast) await this._yieldForPaint(opts.signal);
         }
 
         const last = steps[steps.length - 1];
@@ -1063,6 +1078,7 @@ setCrypto(config = {}) {
         let decodes = probe ? 1 : 0;
         let probeUsed = false;
         for (let r = start; r >= end; --r) {
+            checkAbort(opts.signal);
             // The probe already decoded the coarsest level; reuse it rather
             // than paying for the identical decode twice.
             let decoded;
@@ -1113,7 +1129,8 @@ setCrypto(config = {}) {
             }
             // Yield to the browser's renderer after each paint so every frame is
             // actually shown, not coalesced away into the final one.
-            if (opts.canvas && !isLast) await this._yieldForPaint();
+            checkAbort(opts.signal);
+            if (opts.canvas && !isLast) await this._yieldForPaint(opts.signal);
         }
         const last = steps[steps.length - 1];
         return {
@@ -1233,14 +1250,31 @@ setCrypto(config = {}) {
     // frame to be composited and presented to the user. Double requestAnimation
     // Frame guarantees the paint has been flushed before the next layer is
     // fetched, so progressive frames are actually visible one by one.
-    _yieldForPaint() {
-        return new Promise((resolve) => {
+    _yieldForPaint(signal) {
+        checkAbort(signal);
+        return new Promise((resolve, reject) => {
+            let first, second, timer;
+            const cleanup = () => {
+                signal?.removeEventListener('abort', abort);
+                if (first != null) globalThis.cancelAnimationFrame?.(first);
+                if (second != null) globalThis.cancelAnimationFrame?.(second);
+                if (timer != null) {
+                    if (typeof clearImmediate === 'function') clearImmediate(timer);
+                    clearTimeout(timer);
+                }
+            };
+            const finish = () => { cleanup(); resolve(); };
+            const abort = () => {
+                cleanup();
+                reject(signal.reason || new DOMException('Operation aborted', 'AbortError'));
+            };
+            signal?.addEventListener('abort', abort, { once: true });
             if (typeof window !== 'undefined' && typeof requestAnimationFrame === 'function') {
-                requestAnimationFrame(() => requestAnimationFrame(resolve));
+                first = requestAnimationFrame(() => { second = requestAnimationFrame(finish); });
             } else if (typeof setImmediate === 'function') {
-                setImmediate(resolve);
+                timer = setImmediate(finish);
             } else {
-                setTimeout(resolve, 0);
+                timer = setTimeout(finish, 0);
             }
         });
     }

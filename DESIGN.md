@@ -803,6 +803,13 @@ example the uploader's thumbnail grid, which renders every row at once) must use
 it rather than mutating the shared `server.imagePath`, which would otherwise
 race and make several rows resolve to the same last-set path.
 
+These four reading methods also accept an optional `signal: AbortSignal`.
+It is forwarded to metadata and packet-window fetches, including body reads.
+Progressive loops check it between frames, and paint yields can be aborted even
+when animation frames are paused. Abort rejects with the signal's reason; it
+does not return a completed image. A running synchronous WASM decode finishes
+before control can return to the event loop.
+
 ### 8.3 Metadata lookup and bounded downloads
 
 For a new encrypted image, `display()`, `preview()` and `playAll()`:
