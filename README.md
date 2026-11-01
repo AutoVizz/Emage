@@ -9,11 +9,10 @@ Open `index.html` for uploads, `downloader.html` for progressive downloads, and
 1. Start the API from `Emage-Server` with `docker compose up --build -d`.
    Upload and delete use the password configured as `EMAGE_UPLOAD_PASSWORD`
    in the server's `.env` file.
-2. Ensure `cmake-build-wasm/` contains `EmageWasmEncoder.js`,
-   `EmageWasmEncoder.wasm`, `EmageWasmDecoder.js`, and `EmageWasmDecoder.wasm`.
-   These existing build artifacts are present locally and ignored by Git.
-3. From `Emage-Client`, run `python3 -m http.server 8080` and open
-   `http://localhost:8080/`. Serve over HTTP rather than opening HTML files directly.
+2. The API server serves both JavaScript/WASM codec pairs under `/wasm/`.
+   Its Docker build compiles these from the Emage-Wasm checkout.
+3. From `Emage-Client`, run `docker compose up --build -d` and open
+   `http://localhost:3433/`. Anubis challenges requests before serving the client.
 4. Use `http://localhost:3233` as the server URL, or enter your API's address.
 
 Choose a source image, encode it, save the generated keys, and upload using the

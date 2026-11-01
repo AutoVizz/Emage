@@ -87,6 +87,7 @@ export class Page {
       if (typeof saved[name] === 'string') $('#' + id).value = saved[name];
       $('#' + id).addEventListener('change', () => { this.remember(); this.updateHost(id === 'serverUrl' ? false : undefined); });
     }
+    $('#retryInitBtn').onclick = () => { this.remember(); window.location.reload(); };
     this.updateHost();
     this.sync();
   }
@@ -116,18 +117,21 @@ export class Page {
   }
   sync() {
     document.querySelectorAll('main button, main input').forEach(el => { el.disabled = !this.engine || this.busy; });
+    if (!this.engine) { $('#serverUrl').disabled = false; $('#retryInitBtn').disabled = false; }
     if (this.engine && !this.busy) this.onSync();
     $('main').setAttribute('aria-busy', String(this.busy));
   }
   async init() {
     setStatus('Loading WebAssembly codecs…');
     try {
-      this.engine = await Emage.init({ wasmBase: new URL('../cmake-build-wasm/', import.meta.url).href });
+      this.engine = await Emage.init({ serverBaseUrl: $('#serverUrl').value });
       this.sync();
       setStatus('Ready. Choose an image to get started.');
       return true;
     } catch (error) {
-      setStatus('Could not load WebAssembly codecs: ' + Emage.messageOf(error), true);
+      $('#retryInitBtn').hidden = false;
+      this.sync();
+      setStatus('Could not load WebAssembly codecs: ' + Emage.messageOf(error) + '. Check the server URL and retry.', true);
       return false;
     }
   }

@@ -1,0 +1,19 @@
+services:
+  anubis:
+    image: ghcr.io/techarohq/anubis:v1.28.2
+    environment:
+      TARGET: http://client:80
+      BIND: :8923
+      POLICY_FNAME: /data/cfg/policy.yaml
+      USE_REMOTE_ADDRESS: ${ANUBIS_USE_REMOTE_ADDRESS:-true}
+    ports:
+      - "${CLIENT_PORT:-3433}:8923"
+    volumes:
+      - ./anubis-policy.yaml:/data/cfg/policy.yaml:ro
+    depends_on:
+      - client
+    restart: unless-stopped
+
+  client:
+    build: .
+    restart: unless-stopped

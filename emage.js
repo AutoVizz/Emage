@@ -86,6 +86,8 @@ function parseJson(resp) {
     });
 }
 
+const loadedWasmFactories = new Map();
+
 function injectScript(src) {
     return new Promise((resolve, reject) => {
         const s = document.createElement('script');
@@ -97,21 +99,22 @@ function injectScript(src) {
     });
 }
 
-function defaultWasmBase() {
-    try {
-        return new URL('cmake-build-wasm/', import.meta.url).href;
-    } catch (_) {
-        return '/cmake-build-wasm/';
-    }
+function defaultWasmBase(serverBaseUrl = '') {
+    return String(serverBaseUrl).trim().replace(/\/+$/, '') + '/wasm/';
 }
 
 async function instantiateWasm(name, file, { factory, url, wasmBase }) {
     let f = factory;
-    if (f == null && typeof globalThis !== 'undefined') f = globalThis[name];
+    const src = url || (wasmBase && wasmBase + file);
+    const loaded = loadedWasmFactories.get(name);
+    if (f == null && typeof globalThis !== 'undefined') {
+        const globalFactory = globalThis[name];
+        if (!loaded || globalFactory !== loaded.factory || loaded.src === src) f = globalFactory;
+    }
     if (f == null && typeof document !== 'undefined' && (url || wasmBase)) {
-        const src = url || wasmBase + file;
         await injectScript(src);
         f = globalThis[name];
+        if (f != null) loadedWasmFactories.set(name, { src, factory: f });
     }
     if (f == null) {
         throw new EmageError(
@@ -199,7 +202,7 @@ export class Emage {
     }
 
     static async init(options = {}) {
-        const wasmBase = options.wasmBase != null ? options.wasmBase : defaultWasmBase();
+        const wasmBase = options.wasmBase != null ? options.wasmBase : defaultWasmBase(options.serverBaseUrl);
         const encoder = await instantiateWasm('J2KEncoder', 'EmageWasmEncoder.js', {
             factory: options.encoder,
             url: options.encoderUrl,

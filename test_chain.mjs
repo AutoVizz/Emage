@@ -7,11 +7,10 @@
 // and what OpenJPEG reports shows up here and nowhere else.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { wasmDir } from './wasm_test_path.mjs';
 import { Emage } from './emage.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const build = path.join(here, 'cmake-build-wasm');
+const build = wasmDir;
 const BASE = process.env.EMAGE_BASE || 'http://localhost:3233';
 const PASSWORD = process.env.EMAGE_PASSWORD || '';
 const IMAGE = 'chain-verify.j2k';

@@ -4,7 +4,7 @@
   "scripts": {
     "test": "node test_key_metadata.mjs && node test_ui.mjs && node test_blog.mjs && node test_docs.mjs && node test_theme.mjs && python3 -m unittest tools.test_demo_server",
     "test:blog": "node test_blog.mjs && node test_docs.mjs && node test_theme.mjs && python3 -m unittest tools.test_demo_server",
-    "start": "python3 -m http.server 8080",
+    "start": "python3 -m http.server 3433",
     "blog": "node tools/build-demo-assets.mjs && python3 tools/demo_server.py"
   },
   "devDependencies": {

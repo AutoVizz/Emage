@@ -94,8 +94,7 @@ available, all four bundles fetch 200 with correct MIME, fetch is native.
   test_chain.mjs` (and the other .mjs files).
 - Rebuild WASM: `source ~/emsdk/emsdk_env.sh && cmake --build
   ~/CLionProjects/EmageWasm/cmake-build-wasm -j4`. Needs the Emscripten
-  toolchain; POST_BUILD copies bundles into `~/CLionProjects/EmageClient/
-  cmake-build-wasm/`.
+  toolchain; POST_BUILD copies bundles into `~/RiderProjects/Emage/Emage/wwwroot/wasm/`.
 - Server tests: `cd ~/RiderProjects/Emage && DOTNET_ROOT=$HOME/.dotnet
   ~/.dotnet/dotnet test Emage.slnx -c Release`.
 - Upload password is `EMAGE_UPLOAD_PASSWORD` in `~/RiderProjects/Emage/.env`.

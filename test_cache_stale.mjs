@@ -1,3 +1,4 @@
+import { wasmDir } from './wasm_test_path.mjs';
 // Does the server serve stale bytes after a re-upload to the same path?
 // J2kImageLibrary caches the parsed codestream keyed by full path; UploadImage
 // writes the file but may not invalidate that entry.
@@ -6,7 +7,7 @@ import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const CLIENT = '/home/saturn/CLionProjects/EmageClient';
-const WASM = CLIENT + '/cmake-build-wasm';
+const WASM = wasmDir;
 const { Emage } = await import(CLIENT + '/emage.js');
 
 const dataUrl = (b) => 'data:application/wasm;base64,' +

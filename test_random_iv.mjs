@@ -1,3 +1,4 @@
+import { wasmDir } from './wasm_test_path.mjs';
 // Per-file random IV: two encodes must not share a counter block, and the
 // decoder must work without the caller supplying one.
 import { createRequire } from 'node:module';
@@ -5,7 +6,7 @@ import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const CLIENT = '/home/saturn/CLionProjects/EmageClient';
-const WASM = CLIENT + '/cmake-build-wasm';
+const WASM = wasmDir;
 const { Emage } = await import(CLIENT + '/emage.js');
 
 const dataUrl = (b) => 'data:application/wasm;base64,' +

@@ -1,3 +1,4 @@
+import { wasmDir } from './wasm_test_path.mjs';
 // End-to-end verification of the resolution-level loading path in emage.js,
 // against the live server and the real WASM encoder/decoder.
 //
@@ -10,7 +11,7 @@ import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const CLIENT = '/home/saturn/CLionProjects/EmageClient';
-const WASM = CLIENT + '/cmake-build-wasm';
+const WASM = wasmDir;
 const { Emage } = await import(CLIENT + '/emage.js');
 
 const dataUrl = (b) => 'data:application/wasm;base64,' +

@@ -1,0 +1,4 @@
+bots:
+  - name: challenge-all
+    path_regex: ".*"
+    action: CHALLENGE

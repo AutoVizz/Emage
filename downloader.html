@@ -19,6 +19,7 @@
 
 <section class="card bar" aria-label="Connection and key">
 <div class="stack"><label class="lbl" for="serverUrl">Server URL</label><input id="serverUrl" class="field mono" value="http://localhost:3233"></div>
+<button id="retryInitBtn" class="btn" type="button" hidden>Retry connection</button>
 <div class="stack"><label class="lbl" for="imgPath">Image path</label><input id="imgPath" class="field mono" value="" placeholder="folder/image.j2k"></div>
 <div class="stack" style="grid-column:span 2;min-width:min(220px,100%)"><label class="lbl" for="keyInput">Decryption key <span>· AES-256, hex; blank for plaintext</span></label><input id="keyInput" class="field mono" style="font-size:12px" value="" placeholder="64 hex digits; blank for plaintext"></div>
 </section>

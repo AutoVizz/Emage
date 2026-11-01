@@ -1,10 +1,11 @@
+import { wasmDir } from './wasm_test_path.mjs';
 // Preview / thumbnail path across access levels, against the live server.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const CLIENT = '/home/saturn/CLionProjects/EmageClient';
-const WASM = CLIENT + '/cmake-build-wasm';
+const WASM = wasmDir;
 const { Emage } = await import(CLIENT + '/emage.js');
 
 const dataUrl = (b) => 'data:application/wasm;base64,' +

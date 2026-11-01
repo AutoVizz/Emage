@@ -3,9 +3,12 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { Emage } from './emage.js';
+import { wasmDir } from './wasm_test_path.mjs';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const wasm = new URL('./cmake-build-wasm/', import.meta.url);
+const wasm = pathToFileURL(path.resolve(wasmDir) + path.sep);
 const binary = name => 'data:application/wasm;base64,' + readFileSync(new URL(name, wasm)).toString('base64');
 const emage = await Emage.init({
     encoder: () => require(new URL('EmageWasmEncoder.js', wasm).pathname)({ locateFile: () => binary('EmageWasmEncoder.wasm') }),

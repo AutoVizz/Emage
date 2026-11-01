@@ -1,3 +1,6 @@
+import { wasmDir } from '../wasm_test_path.mjs';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 // Original, procedural artwork: ten different RGB images, with lossless PNG
 // originals and encrypted lossless J2K counterparts. No downloads/dependencies.
 import { createRequire } from 'node:module';
@@ -10,7 +13,7 @@ import { Emage } from '../emage.js';
 const require = createRequire(import.meta.url);
 const root = new URL('../', import.meta.url);
 const directory = new URL('demo-assets/', root);
-const wasm = new URL('cmake-build-wasm/', root);
+const wasm = pathToFileURL(path.resolve(wasmDir) + path.sep);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const build = hash(Buffer.concat([readFileSync(fileURLToPath(import.meta.url)), ...['EmageWasmEncoder.wasm', 'EmageWasmDecoder.wasm'].map(name => readFileSync(new URL(name, wasm)))]));
 mkdirSync(directory, { recursive: true });

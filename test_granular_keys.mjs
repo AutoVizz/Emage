@@ -1,3 +1,4 @@
+import { wasmDir } from './wasm_test_path.mjs';
 // Granular progressive keys, exercised through the public Emage API:
 // key chain derivation, access-level clamping, the layer window the client
 // requests, and the keys the upload result exposes.
@@ -8,7 +9,7 @@ import { createHash } from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const WASM = '/home/saturn/CLionProjects/EmageWasm/cmake-build-wasm';
+const WASM = wasmDir;
 const { Emage } = await import(path.join(here, 'emage.js'));
 
 const encoderModule = require(path.join(WASM, 'EmageWasmEncoder.js'));

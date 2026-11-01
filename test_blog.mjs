@@ -1,3 +1,6 @@
+import { wasmDir } from './wasm_test_path.mjs';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 // Real WASM codecs, generated fixtures, and page handlers. In-process DOM and
 // protocol adapters keep this runnable without sockets. Proxy pacing is tested
 // separately in Python; these timings are test timings, never article results.
@@ -15,7 +18,7 @@ const { JSDOM } = require('jsdom');
 const root = new URL('./', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('demo-assets/manifest.json', root)));
 const hash = value => createHash('sha256').update(value).digest('hex');
-const wasm = new URL('cmake-build-wasm/', root);
+const wasm = pathToFileURL(path.resolve(wasmDir) + path.sep);
 const binary = name => 'data:application/wasm;base64,' + readFileSync(new URL(name, wasm)).toString('base64');
 const engine = await Emage.init({
   encoder: () => require(new URL('EmageWasmEncoder.js', wasm).pathname)({ locateFile: () => binary('EmageWasmEncoder.wasm') }),

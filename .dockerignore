@@ -1,0 +1,13 @@
+**
+!*.html
+!emage.js
+!css/
+!css/**
+!js/
+!js/**
+!assets/
+!assets/**
+!demo-assets/
+!demo-assets/**
+!vendor/
+!vendor/noble-sha3.js
