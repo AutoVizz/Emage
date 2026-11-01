@@ -117,8 +117,9 @@ Right sidebar (sticky):
   per-file size/dimensions/layers). Click selects, double-click opens and loads.
 - **3. Progressive load** — `#metaBtn` (Fetch meta), `#fullBtn` (Load full),
   `#sizeInput` (display size, e.g. `200`, `10vw`), `#sizeBtn` (Load for size).
-  `#dstCanvas` renders the decoded image; `#stageLabel` shows current layer
-  progress; `#status` reports dimensions, step count, bytes, and protection.
+  `#dstCanvas` displays the requested longest-edge size and preserves the
+  aspect ratio; large images scroll within the preview. `#stageText` distinguishes
+  displayed dimensions from the decoded resolution; `#status` reports dimensions, step count, bytes, and protection.
 
 ### `compare.html` — Transfer-Strategy Comparison
 

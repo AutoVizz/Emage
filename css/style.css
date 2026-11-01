@@ -122,6 +122,11 @@ h1{font-size:32px;font-weight:800;letter-spacing:-.025em;line-height:1.1}
 .preview canvas[width="0"]{display:none}
 .viewer .preview{padding:18px 18px 55px;background:var(--soft)}
 .viewer .preview canvas{padding:18px 18px 55px}
+/* The downloader displays requested pixels instead of stretching to its card. */
+.sized-viewer{aspect-ratio:auto;overflow:auto}
+.sized-viewer .preview{position:relative;inset:auto;width:max-content;min-width:100%;min-height:240px;padding:18px}
+.sized-viewer .preview canvas{position:static;inset:auto;flex:none;width:auto;height:auto;padding:0;max-width:none}
+.sized-viewer .stage{position:static;width:fit-content;margin:0 14px 14px}
 .panel .preview{min-height:180px}
 .keyitem .hex{overflow-wrap:anywhere;user-select:all}
 .chips span{overflow-wrap:anywhere;max-width:100%}

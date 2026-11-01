@@ -26,6 +26,7 @@ function clear() {
   hasSecurity = false;
   cached = null;
   canvas.width = canvas.height = 0;
+  canvas.style.width = canvas.style.height = '';
   $('#decodedEmpty').hidden = false;
   $('#stageText').textContent = 'No image loaded';
   $('#fileName').textContent = $('#imgPath').value.trim() || 'Choose an image';
@@ -33,6 +34,17 @@ function clear() {
   $('#bytesText').textContent = '';
   drawLevels();
   drawZones();
+}
+function showSize(width, height, dimension = null) {
+  const scale = dimension > 0 ? dimension / Math.max(width, height) : 1;
+  const shown = { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+  canvas.style.width = `${shown.width}px`;
+  canvas.style.height = `${shown.height}px`;
+  return shown;
+}
+function stageText(level, decoded, shown) {
+  const size = `${shown.width} × ${shown.height}`;
+  return `Level ${level} · ${size}${shown.width !== decoded.width || shown.height !== decoded.height ? ` displayed · ${decoded.width} × ${decoded.height} decoded` : ''}`;
 }
 function drawLevels() {
   $('#levels').innerHTML = !metadata ? '<span class="sub">Fetch metadata or load an image to see its levels.</span>' : Array.from({ length: metadata.layers }, (_, level) => {
@@ -79,6 +91,7 @@ function load(target) {
     const result = await client.display(target, {
       canvas,
       onLayer: frame => {
+        showSize(canvas.width, canvas.height);
         $('#decodedEmpty').hidden = true;
         $('#stageText').textContent = `${frame.width} × ${frame.height} · ${frame.complete ? 'Final frame' : `Frame ${frame.layer} of ${frame.totalLayers}`}`;
         setStatus(`Decoded ${frame.width} × ${frame.height}${frame.complete ? '.' : ' — fetching the next resolution…'}`);
@@ -93,13 +106,14 @@ function load(target) {
     granted = hasSecurity ? decoded.keyLevel : metadata.layers - 1;
     loadedLevel = metadata.layers - 1 - decoded.reduction;
     loadingLevel = loadedLevel;
-    cached = { client, stream: result.stream, transferredBytes: result.transferredBytes, httpRequests: result.httpRequests };
-    // Paint at the authenticated decoded size, including for restricted keys.
+    cached = { client, stream: result.stream, transferredBytes: result.transferredBytes, httpRequests: result.httpRequests, displayDimension: result.targetDimension };
+    // Keep the authenticated raster and size its on-screen display independently.
     client.paintTo(canvas, decoded);
+    const shown = showSize(decoded.width, decoded.height, result.targetDimension);
     $('#decodedEmpty').hidden = true;
     $('#fileName').textContent = $('#imgPath').value.trim();
     $('#accessBadge').textContent = hasSecurity ? `Key opens levels 0 to ${granted} of ${metadata.layers - 1}` : `Plaintext · ${metadata.layers} accessible levels`;
-    $('#stageText').textContent = `Level ${loadedLevel} · ${decoded.width} × ${decoded.height}`;
+    $('#stageText').textContent = stageText(loadedLevel, decoded, shown);
     $('#bytesText').textContent = `${fmtBytes(result.transferredBytes)} fetched · ${fmtBytes(metadata.bytes)} file`;
     drawLevels();
     drawZones();
@@ -116,7 +130,8 @@ $('#levels').onclick = event => {
       reduction: metadata.layers - 1 - level,
     });
     loadingLevel = level;
-    $('#stageText').textContent = `Level ${level} · ${decoded.width} × ${decoded.height}`;
+    const shown = showSize(decoded.width, decoded.height, cached.displayDimension);
+    $('#stageText').textContent = stageText(level, decoded, shown);
     drawLevels();
     setStatus(`Level ${level} · ${decoded.width} × ${decoded.height} · rendered from downloaded bytes · ${cached.httpRequests} HTTP requests from the last load · ${hasSecurity ? 'MAC chain verified' : 'plaintext'}.`);
   });
