@@ -186,10 +186,8 @@ class Deployment:
             self.progress('building', 'Building the server, WASM, client and blog proxy. Current services stay running.')
             subprocess.run(self.compose('build', *args, *BUILD_SERVICES), check=True, timeout=3600)
             self.progress('deploying', 'Starting the rebuilt application services.')
-            # Keep Anubis running during normal deployments so browser sessions survive.
-            targets = list(BUILD_SERVICES)
-            if 'anubis' in self.failures():
-                targets.append('anubis')
+            # Refresh Anubis so its upstream resolves the replacement client's address.
+            targets = list(SERVICES)
             deployed = True
             subprocess.run(self.compose('up', '-d', '--no-build', '--no-deps', '--force-recreate', *targets), check=True, timeout=180)
             self.progress('verifying', 'Checking the new services.')

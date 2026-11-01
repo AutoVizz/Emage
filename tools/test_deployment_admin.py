@@ -132,7 +132,7 @@ class AdminTests(unittest.TestCase):
         self.assertIn('build', commands[0])
         self.assertIn('up', commands[1])
         self.assertNotIn('admin', commands[1])
-        self.assertNotIn('anubis', commands[1])
+        self.assertIn('anubis', commands[1])
         self.assertEqual(self.deployment.job['state'], 'succeeded')
         self.assertFalse(self.deployment.active)
 
