@@ -124,14 +124,14 @@ export class Page {
   async init() {
     setStatus('Loading WebAssembly codecs…');
     try {
-      this.engine = await Emage.init({ serverBaseUrl: $('#serverUrl').value });
+      this.engine = await Emage.init();
       this.sync();
       setStatus('Ready. Choose an image to get started.');
       return true;
     } catch (error) {
       $('#retryInitBtn').hidden = false;
       this.sync();
-      setStatus('Could not load WebAssembly codecs: ' + Emage.messageOf(error) + '. Check the server URL and retry.', true);
+      setStatus('Could not load WebAssembly codecs: ' + Emage.messageOf(error) + '. Retry loading the page.', true);
       return false;
     }
   }

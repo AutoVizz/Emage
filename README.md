@@ -9,8 +9,8 @@ Open `index.html` for uploads, `downloader.html` for progressive downloads, and
 1. Start the API from `Emage-Server` with `docker compose up --build -d`.
    Upload and delete use the password configured as `EMAGE_UPLOAD_PASSWORD`
    in the server's `.env` file.
-2. The API server serves both JavaScript/WASM codec pairs under `/wasm/`.
-   Its Docker build compiles these from the Emage-Wasm checkout.
+2. The client Docker image compiles both JavaScript/WASM codec pairs from the
+   Emage-Wasm checkout and serves them alongside the site under `/wasm/`.
 3. From `Emage-Client`, run `docker compose up --build -d` and open
    `http://localhost:3433/`. Anubis challenges requests before serving the client.
 4. Use `http://localhost:3233` as the server URL, or enter your API's address.

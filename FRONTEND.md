@@ -11,7 +11,7 @@ framework, no bundler. It is served as static files (conventionally on
 
 The heavy lifting (JPEG 2000 encode/decode, AES-256-CTR zone encryption, SHA3-256
 MACs, key derivation) lives in two Emscripten WebAssembly modules,
-`EmageWasmEncoder` and `EmageWasmDecoder`, served by the API server under `/wasm/`.
+`EmageWasmEncoder` and `EmageWasmDecoder`, served by the static client under `/wasm/`.
 The frontend wraps those modules in a small library, `emage.js`, and drives it
 from three demo pages. The end-to-end format and security model are documented in
 `DESIGN.md`; `context.md` summarizes the implementation state.
@@ -137,7 +137,7 @@ Right sidebar (sticky):
 
 All three import `Emage` and `EmageError` from `./emage.js`; the uploader also
 imports `sha3_256` from `./vendor/noble-sha3.js` for local key-coverage indexing.
-They initialize with `Emage.init({ serverBaseUrl: serverUrl })`, then
+They initialize with `Emage.init()`, then
 push UI state into the library before each action via `emage.setServer({...})`
 and `emage.setCrypto({ key, iv })`.
 
@@ -158,8 +158,8 @@ python3 -m http.server 3433
 ```
 
 Then open `http://localhost:3433/uploader.html` (or the other two pages) with
-the API server reachable at the configured base URL. The server must include the WASM bundles built by the EmageWasm repository.
-Node tests use the server project’s `Emage/wwwroot/wasm/` assets by default; set
+the API server reachable at the configured base URL. For plain static hosting, build the EmageWasm repository to populate the client’s `wasm/` directory.
+Node tests use the client’s `wasm/` assets by default; set
 `EMAGE_WASM_DIR` to use a different asset directory. Node test suites live alongside the pages (`test_*.mjs`); live suites need
 `EMAGE_PASSWORD` set from the server's upload password.
 
@@ -176,7 +176,7 @@ docker compose up --build -d
 Open `http://localhost:3433/` and set the API server URL as needed. Anubis
 challenges requests using `anubis-policy.yaml` and forwards accepted requests
 to the private nginx container. Set `CLIENT_PORT` to change the exposed port. The client and Anubis
-containers do not protect the separately hosted API server or its WASM assets.
+containers protect the site and codec assets. The API is hosted separately.
 
 For production, put a TLS-terminating reverse proxy in front of Anubis. Configure
 it to overwrite forwarded client IP headers with trusted values and set
@@ -186,7 +186,6 @@ published separately or requests can bypass Anubis. See the [Anubis installation
 documentation](https://github.com/TecharoHQ/anubis/blob/main/docs/docs/admin/installation.mdx)
 for proxy and policy configuration.
 
-The server image builds and serves the WASM bundles separately. From the server
-repository, run `docker compose build` or `make docker-build`; both use the
-EmageWasm checkout at `../../CLionProjects/EmageWasm` as a named build context.
-For a different checkout, set `WASM_SOURCE` when using `make docker-build`.
+The client image compiles WASM from the sibling `../EmageWasm` checkout.
+Set `WASM_SOURCE` if that checkout is elsewhere. The API server image builds
+independently and only serves API requests.

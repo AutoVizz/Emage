@@ -758,14 +758,14 @@ subclass `Error`.
 ### 8.1 Configuration
 
 ```js
-const emage = await Emage.init({ serverBaseUrl: 'http://localhost:3233' });
+const emage = await Emage.init();
 emage.setServer({ baseUrl: 'http://localhost:3233', imagePath: 'example.j2k' });
 emage.setCrypto({ key: grantedKey }); // automatic resolution; IV comes from SEC
 const image = await emage.playAll();
 ```
 
 `init()` resolves modules from an explicit factory, a module global, or an
-injected script. `wasmBase` defaults to `/wasm/` on `serverBaseUrl` (or the page origin).
+injected script. `wasmBase` defaults to `wasm/` relative to the client library.
 
 `accessLevel` accepts a non-negative integer ceiling or `all` / `-1` for
 automatic detection. The legacy `levels` alias maps to that same ceiling.
@@ -1031,7 +1031,7 @@ stack and releases caught C++ exceptions so repeated invalid keys cannot
 exhaust the stack.
 
 A `POST_BUILD` step copies each `.js`/`.wasm` pair into
-the server project’s `Emage/wwwroot/wasm/` directory, where the server publishes the assets.
+the client project’s `wasm/` directory, served alongside the rest of the site.
 
 ### Server
 

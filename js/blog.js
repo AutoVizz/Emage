@@ -359,10 +359,7 @@ comparisonPanels();
 sync();
 try {
   const [loadedEngine, loadedManifest, config] = await Promise.all([
-    Emage.init({ serverBaseUrl: (() => {
-      try { return JSON.parse(sessionStorage.getItem('emage.connection.v1') || '{}').baseUrl || 'http://localhost:3233'; }
-      catch { return 'http://localhost:3233'; }
-    })() }),
+    Emage.init(),
     fetch(new URL('../demo-assets/manifest.json', import.meta.url), { cache: 'no-store' }).then(response => { if (!response.ok) throw new Error('Sample manifest missing. Run node tools/build-demo-assets.mjs.'); return response.json(); }),
     fetch(url('/demo/config'), { cache: 'no-store' }).then(response => response.ok ? response.json() : null).catch(() => null),
   ]);

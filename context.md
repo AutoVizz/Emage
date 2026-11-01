@@ -70,7 +70,7 @@ specs in the server and WASM repositories describe the same deployed API.
 - The JS decoder restores its WASM stack and releases caught C++ exceptions.
 - Local server runs on localhost:3233; client on localhost:3433. The server was
   rebuilt with header-metadata support, and the new WASM bundles are published
-  into the server's `Emage/wwwroot/wasm` directory.
+  into the client's `wasm` directory.
 - Server tests cover generic metadata on plaintext/encrypted fixtures, byte-exact
   storage, restart persistence, and preservation across resolution windows.
 - Client tests cover independent SHA3 vectors, restricted access, exact request

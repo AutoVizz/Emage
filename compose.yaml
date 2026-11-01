@@ -15,5 +15,8 @@ services:
     restart: unless-stopped
 
   client:
-    build: .
+    build:
+      context: .
+      additional_contexts:
+        wasm-source: ${WASM_SOURCE:-../EmageWasm}
     restart: unless-stopped

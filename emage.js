@@ -99,8 +99,8 @@ function injectScript(src) {
     });
 }
 
-function defaultWasmBase(serverBaseUrl = '') {
-    return String(serverBaseUrl).trim().replace(/\/+$/, '') + '/wasm/';
+function defaultWasmBase() {
+    return new URL('wasm/', import.meta.url).href;
 }
 
 async function instantiateWasm(name, file, { factory, url, wasmBase }) {
@@ -202,7 +202,7 @@ export class Emage {
     }
 
     static async init(options = {}) {
-        const wasmBase = options.wasmBase != null ? options.wasmBase : defaultWasmBase(options.serverBaseUrl);
+        const wasmBase = options.wasmBase != null ? options.wasmBase : defaultWasmBase();
         const encoder = await instantiateWasm('J2KEncoder', 'EmageWasmEncoder.js', {
             factory: options.encoder,
             url: options.encoderUrl,
