@@ -221,4 +221,4 @@ static client and image API do not get Docker access. The controller needs a
 repository-read `GITHUB_TOKEN` in the private deployment `.env`. The ordinary
 client-only Compose stack does not manage or rebuild an external API server.
 
-Set `EMAGE_CLIENT_PASSWORD` to require a browser login (username `emage`) for every site page and asset after Anubis. Leaving it blank disables this login. `EMAGE_ADMIN_PASSWORD` independently authorizes rebuilds at `/admin`; leaving it blank disables manual rebuilds. `EMAGE_UPLOAD_PASSWORD` remains the API upload credential. Store real passwords only in private `.env`, never in `.env.example`.
+Set `EMAGE_CLIENT_PASSWORD` to require a password-only login page with a private session cookie for every site page and asset after Anubis. Leaving it blank disables this login. `EMAGE_ADMIN_PASSWORD` independently authorizes rebuilds at `/admin`; leaving it blank disables manual rebuilds. `EMAGE_UPLOAD_PASSWORD` remains the API upload credential. Store real passwords only in private `.env`, never in `.env.example`.
