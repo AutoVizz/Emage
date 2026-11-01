@@ -377,7 +377,7 @@ try {
   ownerKeys();
   const origins = [...(transport?.emageOrigins || []), ...(transport?.pngOrigins || [])];
   ready = Boolean(config?.ready && config?.images === 10 && config?.profiles?.demo?.bytesPerSecond === 2 * 1024 * 1024 && transport?.emageOrigins?.length === 2 && transport?.pngOrigins?.length === 2 && new Set(origins).size === 4 && origins.every(origin => new URL(origin).origin !== window.location.origin));
-  status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Start or restart the demo proxy with npm run blog in Emage-Client, then open http://localhost:8082/blog.html. This version needs the 2 MiB/s profile and independent gallery connections.', !ready);
+  status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'The demo proxy is not ready. For Docker, check the demo service logs, correct its API URL or upload password, and restart it, then reload. The proxy needs the 2 MiB/s profile and independent gallery connections. For a local run, use npm run blog and open http://localhost:8082/blog.html.', !ready);
 } catch (error) {
   status('bootStatus', 'Demo setup failed: ' + Emage.messageOf(error), true);
 }

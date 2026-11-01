@@ -15,6 +15,11 @@ Open `index.html` for uploads, `downloader.html` for progressive downloads, and
    `http://localhost:3433/`. Anubis challenges requests before serving the client.
 4. Use `http://localhost:3233` as the server URL, or enter your API's address.
 
+The Docker stack also includes the interactive blog at `/blog.html`. Put the
+API's `EMAGE_UPLOAD_PASSWORD` in the client's `.env` so the demo proxy can seed
+ten public sample images. The site uses port 3433; ports 3434–3437 serve its
+isolated gallery transfers. See `FRONTEND.md` for remote-host and TLS settings.
+
 Choose a source image, encode it, save the generated keys, and upload using the
 server password. Existing `.j2k`/`.j2c` codestreams can also be loaded, decoded,
 downloaded, and uploaded. Resolution counts depend on the source dimensions.

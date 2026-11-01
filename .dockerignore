@@ -11,3 +11,6 @@
 !demo-assets/**
 !vendor/
 !vendor/noble-sha3.js
+!nginx.conf
+!tools/
+!tools/demo_server.py

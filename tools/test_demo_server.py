@@ -5,7 +5,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from tools.demo_server import DemoHandler, DemoState, PROFILES, ROOT, SharedBandwidth, TransferCancelled, create_servers
+from tools.demo_server import DemoHandler, DemoState, PROFILES, ROOT, SharedBandwidth, TransferCancelled, create_servers, seed_with_retry
 
 
 class ThrottlingTests(unittest.TestCase):
@@ -145,6 +145,58 @@ class ThrottlingTests(unittest.TestCase):
         self.assertIs(servers[1].state.bucket('slow', '12345678', 'gallery-emage'), servers[2].state.bucket('slow', '12345678', 'gallery-emage'))
         self.assertIsNot(servers[1].state.bucket('slow', '12345678', 'gallery-emage'), servers[3].state.bucket('slow', '12345678', 'gallery-png'))
 
+    def test_docker_listeners_advertise_public_origins_and_allow_site_cors(self):
+        instances = []
+
+        def server(address, _handler):
+            instance = SimpleNamespace(server_address=address, server_close=Mock())
+            instances.append(instance)
+            return instance
+
+        with patch('tools.demo_server.ThreadingHTTPServer', side_effect=server):
+            servers = create_servers(self.state, 8082, bind='0.0.0.0',
+                                     public_origin='http://localhost:3433',
+                                     transport_ports=[3434, 3435, 3436, 3437])
+        self.assertEqual([item.server_address for item in servers],
+                         [('0.0.0.0', port) for port in [8082, 3434, 3435, 3436, 3437]])
+        self.assertEqual(self.state.transport['emageOrigins'], ['http://localhost:3434', 'http://localhost:3435'])
+        self.assertEqual(self.state.transport['pngOrigins'], ['http://localhost:3436', 'http://localhost:3437'])
+        self.assertEqual(self.state.allowed_origins, {'http://localhost:3433', 'http://127.0.0.1:3433'})
+        handler = self.handler()
+        handler.headers['Origin'] = 'http://localhost:3433'
+        with patch('tools.demo_server.SimpleHTTPRequestHandler.end_headers'):
+            DemoHandler.end_headers(handler)
+        self.assertEqual(handler.sent_headers['Access-Control-Allow-Origin'], 'http://localhost:3433')
+
+    def test_tls_transport_origins_can_differ_from_internal_listeners(self):
+        origins = ['https://e1.example', 'https://e2.example', 'https://p1.example', 'https://p2.example']
+        def server(address, _handler):
+            return SimpleNamespace(server_address=address, server_close=Mock())
+        with patch('tools.demo_server.ThreadingHTTPServer', side_effect=server):
+            create_servers(self.state, 8082, bind='0.0.0.0', public_origin='https://site.example',
+                           transport_ports=[3434, 3435, 3436, 3437], transport_origins=origins)
+        self.assertEqual(self.state.transport['emageOrigins'] + self.state.transport['pngOrigins'], origins)
+        self.assertEqual(self.state.allowed_origins, {'https://site.example'})
+
+    def test_invalid_public_network_settings_fail_before_binding(self):
+        invalid = [dict(transport_ports=[3434, 3434, 3436, 3437]),
+                   dict(transport_ports=[3434, 3435]),
+                   dict(public_origin='http://user:secret@host'),
+                   dict(public_origin='https://host/path'),
+                   dict(transport_origins=['https://one.example'] * 4)]
+        for options in invalid:
+            with self.subTest(options=options), patch('tools.demo_server.ThreadingHTTPServer') as server:
+                with self.assertRaises(ValueError):
+                    create_servers(self.state, 8082, **options)
+                server.assert_not_called()
+
+    def test_seed_retries_api_startup_and_stops_after_success(self):
+        with patch('tools.demo_server.seed', side_effect=[RuntimeError('API unavailable'), None]) as seed, \
+                patch('tools.demo_server.time.sleep') as sleep:
+            seed_with_retry(self.state, attempts=3)
+        self.assertEqual(seed.call_count, 2)
+        sleep.assert_called_once_with(2)
+
     def test_failed_transport_start_closes_all_allocated_ports(self):
         instances = []
 
@@ -204,6 +256,16 @@ class ThrottlingTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(result, ['stopped'])
         self.assertTrue(self.state.bucket('slow', '12345678', 'gallery-emage').cancelled.is_set())
+
+    def test_transport_listeners_do_not_serve_static_pages_or_head_requests(self):
+        handler = self.handler()
+        handler.server.transport_only = True
+        handler.path = '/blog.html'
+        handler.do_GET()
+        self.assertEqual(handler.status, 404)
+        handler.send_error = Mock()
+        handler.do_HEAD()
+        handler.send_error.assert_called_once_with(405)
 
     def test_stop_route_only_cancels_the_local_run_and_never_forwards_to_api(self):
         handler = self.handler()

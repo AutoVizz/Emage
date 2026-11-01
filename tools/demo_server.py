@@ -3,7 +3,8 @@
 
 Each (run, lane, profile) has ONE shared byte budget, including all ten gallery
 requests. Each competing strategy gets its own identical budget. This is a
-development proxy, bound to loopback, with fixed upstream and fixture allowlists.
+proxy with fixed upstream and fixture allowlists. It binds to loopback by default;
+Docker can expose its four transport listeners separately from the static site.
 """
 import argparse
 import http.client
@@ -123,6 +124,11 @@ class DemoHandler(SimpleHTTPRequestHandler):
             self.send_header('Timing-Allow-Origin', origin)
             self.send_header('Access-Control-Expose-Headers', ', '.join(RESPONSE_HEADERS))
         super().end_headers()
+
+    def do_HEAD(self):
+        if getattr(self.server, 'transport_only', False):
+            return self.send_error(405)
+        return super().do_HEAD()
 
     def do_OPTIONS(self):
         if not ROUTE.fullmatch(urlsplit(self.path).path) or self.headers.get('Origin') not in self.server.state.allowed_origins:
@@ -259,48 +265,107 @@ def seed(state):
         print(f"Seeded public sample: {image['title']}")
 
 
-def create_servers(state, port):
+def normalize_origin(value):
+    parsed = urlsplit(value)
+    if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
+            parsed.username or parsed.password or parsed.path not in ('', '/') or
+            parsed.query or parsed.fragment):
+        raise ValueError('Public origins must be HTTP(S) origins without credentials or paths.')
+    # Validate the port before binding any listeners.
+    parsed.port
+    return f'{parsed.scheme}://{parsed.netloc}'
+
+
+def create_servers(state, port, bind='127.0.0.1', public_origin=None,
+                   transport_ports=None, transport_origins=None):
     """Four isolated socket pools, five gallery images each; shared row budgets.
 
-    OS-assigned auxiliary ports avoid conflicts with existing local services.
-    The page/control origin stays outside the four saturated transport pools.
+    Local runs allocate auxiliary ports automatically. Docker uses fixed ports
+    and advertises browser-accessible origins instead of container addresses.
     """
+    if transport_ports is not None and (len(transport_ports) != 4 or
+            len(set(transport_ports)) != 4 or any(not 1 <= value <= 65535 for value in transport_ports)):
+        raise ValueError('Specify four distinct transport ports between 1 and 65535.')
+    if public_origin:
+        public_origin = normalize_origin(public_origin)
+    if transport_origins is not None:
+        transport_origins = [normalize_origin(value) for value in transport_origins]
+        if len(transport_origins) != 4 or len(set(transport_origins)) != 4:
+            raise ValueError('Specify four distinct public transport origins.')
     servers = []
     try:
-        page = ThreadingHTTPServer(('127.0.0.1', port), DemoHandler)
+        page = ThreadingHTTPServer((bind, port), DemoHandler)
         page.state, page.daemon_threads, page.transport_only = state, True, False
         servers.append(page)
         page_port = page.server_address[1]
-        state.allowed_origins = {f'http://localhost:{page_port}', f'http://127.0.0.1:{page_port}'}
+        state.allowed_origins = ({public_origin} if public_origin else
+                                 {f'http://localhost:{page_port}', f'http://127.0.0.1:{page_port}'})
+        if public_origin:
+            public = urlsplit(public_origin)
+            if public.hostname in ('localhost', '127.0.0.1'):
+                suffix = f':{public.port}' if public.port else ''
+                state.allowed_origins.update(f'{public.scheme}://{host}{suffix}' for host in ('localhost', '127.0.0.1'))
+        else:
+            public = urlsplit(f'http://127.0.0.1:{page_port}')
+        index = 0
         for name in ('emageOrigins', 'pngOrigins'):
             state.transport[name] = []
             for _ in range(2):
-                server = ThreadingHTTPServer(('127.0.0.1', 0), DemoHandler)
+                server = ThreadingHTTPServer((bind, transport_ports[index] if transport_ports else 0), DemoHandler)
                 server.state, server.daemon_threads, server.transport_only = state, True, True
                 servers.append(server)
-                state.transport[name].append(f'http://127.0.0.1:{server.server_address[1]}')
+                host = f'[{public.hostname}]' if ':' in public.hostname else public.hostname
+                origin = (transport_origins[index] if transport_origins else
+                          f'{public.scheme}://{host}:{server.server_address[1]}')
+                if origin in state.allowed_origins:
+                    raise ValueError('Transport origins must be separate from the page origin.')
+                state.transport[name].append(origin)
+                index += 1
         return servers
-    except OSError:
+    except (OSError, ValueError):
         for server in servers:
             server.server_close()
         raise
 
 
+def seed_with_retry(state, attempts=1, delay=2):
+    if attempts < 1:
+        raise ValueError('Seed attempts must be at least 1.')
+    for attempt in range(attempts):
+        try:
+            seed(state)
+            return
+        except RuntimeError as error:
+            if attempt + 1 == attempts:
+                raise
+            print(f'{error} Retrying demo setup ({attempt + 1}/{attempts})…', flush=True)
+            time.sleep(delay)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8082)
-    parser.add_argument('--api', default='http://localhost:3233')
+    parser.add_argument('--api', default=os.environ.get('DEMO_API_URL', 'http://localhost:3233'))
+    parser.add_argument('--bind', default='127.0.0.1')
+    parser.add_argument('--public-origin', default=os.environ.get('DEMO_PUBLIC_ORIGIN'))
+    parser.add_argument('--transport-ports', help='Four comma-separated listener ports (otherwise allocated automatically).')
+    parser.add_argument('--transport-origins', default=os.environ.get('DEMO_TRANSPORT_ORIGINS'), help='Four comma-separated public origins, if different from the listener ports.')
+    parser.add_argument('--seed-attempts', type=int, default=1)
     parser.add_argument('--skip-seed', action='store_true', help='Use fixtures already uploaded to the API.')
     args = parser.parse_args()
     try:
         manifest = json.loads((ROOT / 'demo-assets' / 'manifest.json').read_text())
         state = DemoState(args.api, manifest)
         if not args.skip_seed:
-            seed(state)
-        servers = create_servers(state, args.port)
+            seed_with_retry(state, args.seed_attempts)
+        ports = [int(value) for value in args.transport_ports.split(',')] if args.transport_ports else None
+        origins = args.transport_origins.split(',') if args.transport_origins else None
+        servers = create_servers(state, args.port, bind=args.bind, public_origin=args.public_origin,
+                                 transport_ports=ports, transport_origins=origins)
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f'{error}\nIf the UI port is occupied, pass --port 8085.\n')
-    print(f'Interactive article: http://localhost:{servers[0].server_address[1]}/blog.html', flush=True)
+    page_origin = args.public_origin or f'http://localhost:{servers[0].server_address[1]}'
+    print(f'Interactive article: {page_origin}/blog.html', flush=True)
     print('Four independent gallery origins; each strategy still shares one bandwidth budget.', flush=True)
     for server in servers[1:]:
         thread = threading.Thread(target=server.serve_forever, daemon=True)

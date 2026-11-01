@@ -20,3 +20,21 @@ services:
       additional_contexts:
         wasm-source: ${WASM_SOURCE:-../EmageWasm}
     restart: unless-stopped
+
+  demo:
+    build:
+      context: .
+      target: demo
+    environment:
+      DEMO_API_URL: ${DEMO_API_URL:-http://host.docker.internal:3233}
+      DEMO_PUBLIC_ORIGIN: ${DEMO_PUBLIC_ORIGIN:-http://localhost:${CLIENT_PORT:-3433}}
+      DEMO_TRANSPORT_ORIGINS: ${DEMO_TRANSPORT_ORIGINS:-}
+      EMAGE_UPLOAD_PASSWORD: ${EMAGE_UPLOAD_PASSWORD:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3434:3434"
+      - "3435:3435"
+      - "3436:3436"
+      - "3437:3437"
+    restart: unless-stopped

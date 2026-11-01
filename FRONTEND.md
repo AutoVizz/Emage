@@ -189,3 +189,20 @@ for proxy and policy configuration.
 The client image compiles WASM from the sibling `../EmageWasm` checkout.
 Set `WASM_SOURCE` if that checkout is elsewhere. The API server image builds
 independently and only serves API requests.
+
+
+The Docker stack includes the blog's demo proxy. Set `EMAGE_UPLOAD_PASSWORD`
+in the client stack's `.env` to the API's upload password, then run
+`docker compose up --build -d` and open `http://localhost:3433/blog.html`.
+The proxy uploads only the ten reserved public blog fixtures when needed.
+It reaches the API at `http://host.docker.internal:3233` by default;
+`DEMO_API_URL` overrides that internal address.
+
+The page and controls use 3433. Ports 3434–3437 carry only allowlisted public
+sample-image transfers, keeping the gallery's four HTTP/1.1 connection pools
+separate. These transport ports do not expose the client site and are outside
+the Anubis challenge. Set `DEMO_PUBLIC_ORIGIN` to the browser-visible site
+origin when using a remote hostname. For TLS deployments, proxy the four
+transport origins too; `DEMO_TRANSPORT_ORIGINS` accepts four comma-separated
+public origins (two Emage, then two PNG) when their addresses differ.
+Check `docker compose logs demo` if seeding or API access fails.
