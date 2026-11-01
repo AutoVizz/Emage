@@ -206,3 +206,19 @@ origin when using a remote hostname. For TLS deployments, proxy the four
 transport origins too; `DEMO_TRANSPORT_ORIGINS` accepts four comma-separated
 public origins (two Emage, then two PNG) when their addresses differ.
 Check `docker compose logs demo` if seeding or API access fails.
+
+
+The standalone deployment provides `/admin`. Enter `EMAGE_ADMIN_PASSWORD`
+and submit a rebuild request to update the entire application stack from the
+configured GitHub branches. The controller builds images before replacing the
+running services, verifies the result, and restores previous images if startup
+checks fail. Real health failures also trigger a rebuild, with a five-minute
+cooldown and a startup grace period to avoid repeated deployment loops.
+There is no public `/health` or `/healthCheck` endpoint.
+
+Deployment control is a separate private service in the standalone stack; the
+static client and image API do not get Docker access. The controller needs a
+repository-read `GITHUB_TOKEN` in the private deployment `.env`. The ordinary
+client-only Compose stack does not manage or rebuild an external API server.
+
+Set `EMAGE_CLIENT_PASSWORD` to require a browser login (username `emage`) for every site page and asset after Anubis. Leaving it blank disables this login. `EMAGE_ADMIN_PASSWORD` independently authorizes rebuilds at `/admin`; leaving it blank disables manual rebuilds. `EMAGE_UPLOAD_PASSWORD` remains the API upload credential. Store real passwords only in private `.env`, never in `.env.example`.

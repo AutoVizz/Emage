@@ -14,3 +14,5 @@
 !nginx.conf
 !tools/
 !tools/demo_server.py
+!tools/deployment_admin.py
+!tools/client-auth.sh
