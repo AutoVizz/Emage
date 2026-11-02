@@ -15,5 +15,3 @@
 !tools/
 !tools/demo_server.py
 !tools/deployment_admin.py
-!tools/client-auth.sh
-!tools/client_auth.py

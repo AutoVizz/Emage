@@ -1,5 +1,5 @@
 const form = document.querySelector('#adminForm');
-const password = document.querySelector('#adminPassword');
+const password = document.querySelector('#uploadPassword');
 const button = document.querySelector('#rebuildButton');
 const status = document.querySelector('#adminStatus');
 const wait = () => new Promise(resolve => setTimeout(resolve, 3000));

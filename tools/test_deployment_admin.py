@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch, MagicMock
 
-from tools.deployment_admin import AdminHandler, Deployment, SERVICES
+from tools.deployment_admin import AdminHandler, Deployment, SERVICES, main
 
 
 class AdminTests(unittest.TestCase):
@@ -27,6 +27,15 @@ class AdminTests(unittest.TestCase):
         handler.send_header = Mock()
         handler.end_headers = Mock()
         return handler
+
+    def test_controller_uses_the_upload_password(self):
+        with patch.dict('os.environ', {'ADMIN_PROJECT_DIR': '/deployment',
+                'ADMIN_PROJECT_NAME': 'test-project', 'EMAGE_UPLOAD_PASSWORD': 'upload-secret'}, clear=True), \
+                patch('tools.deployment_admin.ThreadingHTTPServer') as http_server, \
+                patch('tools.deployment_admin.threading.Thread'), \
+                patch('tools.deployment_admin.logging.basicConfig'):
+            main()
+        self.assertEqual(http_server.return_value.deployment.password, 'upload-secret')
 
     def test_wrong_password_never_enqueues_a_rebuild(self):
         self.deployment.request = Mock()
@@ -132,7 +141,7 @@ class AdminTests(unittest.TestCase):
         self.assertIn('build', commands[0])
         self.assertIn('up', commands[1])
         self.assertNotIn('admin', commands[1])
-        self.assertIn('anubis', commands[1])
+        self.assertEqual(commands[1][-3:], ['server', 'client', 'demo'])
         self.assertEqual(self.deployment.job['state'], 'succeeded')
         self.assertFalse(self.deployment.active)
 

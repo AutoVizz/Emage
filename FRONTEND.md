@@ -168,24 +168,15 @@ See `DESIGN.md` for the SEC marker format, key chain, MAC construction, and the
 metadata COM envelope, and `HANDOFF.md` for a snapshot of an in-progress
 debugging session.
 
-To serve the client behind Anubis, run:
+To serve the client with Docker, run:
 
 ```sh
-docker compose up --build -d
+docker compose up --build -d --remove-orphans
 ```
 
-Open `http://localhost:3433/` and set the API server URL as needed. Anubis
-challenges requests using `anubis-policy.yaml` and forwards accepted requests
-to the private nginx container. Set `CLIENT_PORT` to change the exposed port. The client and Anubis
-containers protect the site and codec assets. The API is hosted separately.
-
-For production, put a TLS-terminating reverse proxy in front of Anubis. Configure
-it to overwrite forwarded client IP headers with trusted values and set
-`ANUBIS_USE_REMOTE_ADDRESS=false`; the default `true` uses the direct network
-peer and is appropriate for direct access. The client container must not be
-published separately or requests can bypass Anubis. See the [Anubis installation
-documentation](https://github.com/TecharoHQ/anubis/blob/main/docs/docs/admin/installation.mdx)
-for proxy and policy configuration.
+Open `http://localhost:3433/` and set the API server URL as needed. nginx
+serves the site and WASM directly without a site login. Set `CLIENT_PORT` to
+change the exposed port. The API is hosted separately.
 
 The client image compiles WASM from the sibling `../EmageWasm` checkout.
 Set `WASM_SOURCE` if that checkout is elsewhere. The API server image builds
@@ -194,22 +185,21 @@ independently and only serves API requests.
 
 The Docker stack includes the blog's demo proxy. Set `EMAGE_UPLOAD_PASSWORD`
 in the client stack's `.env` to the API's upload password, then run
-`docker compose up --build -d` and open `http://localhost:3433/blog.html`.
+`docker compose up --build -d --remove-orphans` and open `http://localhost:3433/blog.html`.
 The proxy uploads only the ten reserved public blog fixtures when needed.
 It reaches the API at `http://host.docker.internal:3233` by default;
 `DEMO_API_URL` overrides that internal address.
 
 The page and controls use 3433. Ports 3434–3437 carry only allowlisted public
 sample-image transfers, keeping the gallery's four HTTP/1.1 connection pools
-separate. These transport ports do not expose the client site and are outside
-the Anubis challenge. Set `DEMO_PUBLIC_ORIGIN` to the browser-visible site
+separate. These transport ports do not expose the client site. Set `DEMO_PUBLIC_ORIGIN` to the browser-visible site
 origin when using a remote hostname. For TLS deployments, proxy the four
 transport origins too; `DEMO_TRANSPORT_ORIGINS` accepts four comma-separated
 public origins (two Emage, then two PNG) when their addresses differ.
 Check `docker compose logs demo` if seeding or API access fails.
 
 
-The standalone deployment provides `/admin`. Enter `EMAGE_ADMIN_PASSWORD`
+The standalone deployment provides `/admin`. Enter `EMAGE_UPLOAD_PASSWORD`
 and submit a rebuild request to update the entire application stack from the
 configured GitHub branches. The controller builds images before replacing the
 running services, verifies the result, and restores previous images if startup
@@ -222,4 +212,7 @@ static client and image API do not get Docker access. The controller needs a
 repository-read `GITHUB_TOKEN` in the private deployment `.env`. The ordinary
 client-only Compose stack does not manage or rebuild an external API server.
 
-Set `EMAGE_CLIENT_PASSWORD` to require a password-only login page with a private session cookie for every site page and asset after Anubis. Leaving it blank disables this login. `EMAGE_ADMIN_PASSWORD` independently authorizes rebuilds at `/admin`; leaving it blank disables manual rebuilds. `EMAGE_UPLOAD_PASSWORD` remains the API upload credential. Store real passwords only in private `.env`, never in `.env.example`.
+`EMAGE_UPLOAD_PASSWORD` is the only password setting. It authorizes API uploads,
+deletes and manual rebuilds at `/admin`. A blank password disables those actions;
+site pages and image reads remain public. Store the real password only in the
+private `.env`, never in `.env.example`.

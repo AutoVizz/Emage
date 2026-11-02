@@ -13,11 +13,11 @@
 <header class="masthead"><a class="site-brand" href="index.html">Emage</a><span>/ Administration</span><label class="theme-control">Theme<select data-theme-select aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></header>
 <main style="max-width:640px;margin:4rem auto;padding:0 1.5rem">
   <h1>Update the application</h1>
-  <p>Enter the admin password to rebuild the server, WASM, client and blog proxy from the configured GitHub branches.</p>
+  <p>Enter the upload password to rebuild the server, WASM, client and blog proxy from the configured GitHub branches.</p>
   <p>The current services stay running during compilation. If the new deployment fails its checks, the previous images are restored.</p>
   <form id="adminForm">
-    <label for="adminPassword">Admin password</label>
-    <input id="adminPassword" name="password" type="password" autocomplete="current-password" required style="display:block;width:100%;box-sizing:border-box;margin:1rem 0;padding:.75rem">
+    <label for="uploadPassword">Upload password</label>
+    <input id="uploadPassword" name="password" type="password" autocomplete="current-password" required style="display:block;width:100%;box-sizing:border-box;margin:1rem 0;padding:.75rem">
     <button type="submit" id="rebuildButton" style="padding:.75rem 1rem">Rebuild entire stack</button>
   </form>
   <p id="adminStatus" role="status" aria-live="polite"></p>

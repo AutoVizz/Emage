@@ -24,9 +24,6 @@ HEALTHCHECK --interval=15s --timeout=3s CMD python3 -c "import urllib.request; u
 ENTRYPOINT ["python3", "-u", "/usr/local/bin/deployment_admin.py"]
 
 FROM nginx:alpine AS client
-RUN apk add --no-cache python3
-COPY tools/client-auth.sh /docker-entrypoint.d/40-client-auth.sh
-COPY tools/client_auth.py /usr/local/bin/client_auth.py
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY *.html emage.js /usr/share/nginx/html/
 COPY css/ /usr/share/nginx/html/css/
@@ -35,5 +32,5 @@ COPY assets/ /usr/share/nginx/html/assets/
 COPY demo-assets/ /usr/share/nginx/html/demo-assets/
 COPY vendor/noble-sha3.js /usr/share/nginx/html/vendor/noble-sha3.js
 COPY --from=wasm-build /tmp/wasm-assets/ /usr/share/nginx/html/wasm/
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 CMD nginx -t && wget -q --spider http://127.0.0.1:8083/ready && wget -q --spider http://127.0.0.1:8081/index.html && wget -q --spider http://127.0.0.1:8081/wasm/EmageWasmEncoder.js && wget -q --spider http://127.0.0.1:8081/wasm/EmageWasmEncoder.wasm && wget -q --spider http://127.0.0.1:8081/wasm/EmageWasmDecoder.js && wget -q --spider http://127.0.0.1:8081/wasm/EmageWasmDecoder.wasm
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 CMD nginx -t && wget -q --spider http://127.0.0.1/index.html && wget -q --spider http://127.0.0.1/wasm/EmageWasmEncoder.js && wget -q --spider http://127.0.0.1/wasm/EmageWasmEncoder.wasm && wget -q --spider http://127.0.0.1/wasm/EmageWasmDecoder.js && wget -q --spider http://127.0.0.1/wasm/EmageWasmDecoder.wasm
 EXPOSE 80

@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 LOG = logging.getLogger('deployment')
-SERVICES = ('server', 'client', 'demo', 'anubis')
+SERVICES = ('server', 'client', 'demo')
 BUILD_SERVICES = ('server', 'client', 'demo')
 REPOSITORIES = {'SERVER_REF': 'Emage-Server', 'WASM_REF': 'Emage-Wasm', 'CLIENT_REF': 'Emage-Client'}
 
@@ -186,7 +186,6 @@ class Deployment:
             self.progress('building', 'Building the server, WASM, client and blog proxy. Current services stay running.')
             subprocess.run(self.compose('build', *args, *BUILD_SERVICES), check=True, timeout=3600)
             self.progress('deploying', 'Starting the rebuilt application services.')
-            # Refresh Anubis so its upstream resolves the replacement client's address.
             targets = list(SERVICES)
             deployed = True
             subprocess.run(self.compose('up', '-d', '--no-build', '--no-deps', '--force-recreate', *targets), check=True, timeout=180)
@@ -273,7 +272,7 @@ class AdminHandler(BaseHTTPRequestHandler):
             return self.respond(400, {'error': 'Invalid request.'})
         status = deployment.authenticate(body.get('password'))
         if status != 200:
-            messages = {401: 'Incorrect admin password.', 429: 'Too many attempts. Try again in one minute.', 503: 'The admin password is not configured.'}
+            messages = {401: 'Incorrect upload password.', 429: 'Too many attempts. Try again in one minute.', 503: 'The upload password is not configured.'}
             return self.respond(status, {'error': messages[status]})
         job = deployment.request('Requested from the admin page.')
         return self.respond(202, job)
@@ -283,7 +282,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     directory = os.environ['ADMIN_PROJECT_DIR']
     project = os.environ['ADMIN_PROJECT_NAME']
-    deployment = Deployment(directory, project, os.environ.get('EMAGE_ADMIN_PASSWORD', ''),
+    deployment = Deployment(directory, project, os.environ.get('EMAGE_UPLOAD_PASSWORD', ''),
         os.environ.get('DEMO_PUBLIC_ORIGIN', 'http://localhost:3433'),
         cooldown=int(os.environ.get('ADMIN_REBUILD_COOLDOWN', '300')),
         grace=int(os.environ.get('ADMIN_STARTUP_GRACE', '180')))
