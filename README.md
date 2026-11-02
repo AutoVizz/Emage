@@ -4,21 +4,46 @@ The UI from `files.zip` uses `emage.js` and the existing WebAssembly codecs.
 Open `index.html` for uploads, `downloader.html` for progressive downloads, and
 `compare.html` for measured comparisons. `uploader.html` also opens the upload UI.
 
-## Run
+## GitHub Pages client
 
-1. Start the API from `Emage-Server` with `docker compose up --build -d --remove-orphans`.
-   Upload and delete use the password configured as `EMAGE_UPLOAD_PASSWORD`
-   in the server's `.env` file.
-2. The client Docker image compiles both JavaScript/WASM codec pairs from the
-   Emage-Wasm checkout and serves them alongside the site under `/wasm/`.
-3. From `Emage-Client`, run `docker compose up --build -d --remove-orphans` and open
-   `http://localhost:3433/`. nginx serves the site and WASM directly.
-4. Use `http://localhost:3233` as the server URL, or enter your API's address.
+The client is published at **https://autovizz.github.io/Emage/** from the public
+`AutoVizz/Emage` repository. Pushes to `main` or a manual run of
+`.github/workflows/pages.yml` compile the public `AutoVizz/Emage-Wasm` source,
+run the checks and deploy the static site. No repository secret or application
+password is needed for the Pages build.
 
-The Docker stack also includes the interactive blog at `/blog.html`. Put the
-API's `EMAGE_UPLOAD_PASSWORD` in the client's `.env` so the demo proxy can seed
-ten public sample images. The site uses port 3433; ports 3434–3437 serve its
-isolated gallery transfers. See `FRONTEND.md` for remote-host and TLS settings.
+Only public HTML, styles, browser scripts, images and the four compiled WASM
+artifacts are uploaded. Backend code, the rebuild console, `.env` files and Git
+credentials are excluded. Asset URLs work under the `/Emage/` project path.
+
+The server deploys separately. Enter its URL in the **Server URL** field;
+`http://localhost:3233` works when the API runs on the visitor's machine.
+For a remote server, use its public HTTPS URL. The upload password is entered
+in the uploader and is never embedded in the site.
+
+Repository variables `EMAGE_API_URL` and `EMAGE_DEMO_URL` can set default public
+API and demo-control addresses during the Pages build. They are URLs, not
+secrets. `WASM_REF` can select a WASM branch, tag or commit; the default is `main`.
+The manual workflow also accepts a WASM ref. A WASM-only change can be published
+by manually running the Pages workflow without rebuilding the server.
+
+## Run the client locally
+
+Start the separate Emage backend, then either use GitHub Pages or build a local
+static client with the sibling WASM checkout:
+
+```sh
+docker compose up --build -d --remove-orphans
+```
+
+Open `http://localhost:3433/`. This Compose file runs only the client. It does
+not run the image API, demo proxy or rebuild controller. If the backend console
+already uses local port 3433, set `CLIENT_PORT=3438` for this optional local client.
+`EMAGE_API_URL` and `EMAGE_DEMO_URL` are public build-time service addresses.
+
+For another static host, compile the codecs into `wasm/`, run
+`npm run build:site`, and publish only `_site/`. The source and codec directories
+are not themselves the publication artifact.
 
 Choose a source image, encode it, save the generated keys, and upload using the
 server password. Existing `.j2k`/`.j2c` codestreams can also be loaded, decoded,
@@ -63,8 +88,9 @@ a running API is still needed to verify rendering, CORS, and the live deployment
 
 `blog.html` is the project write-up with four working experiments, a protocol
 overview, and possible applications. The workspace sidebar links to it as
-**How Emage works**. Network experiments use a local Python proxy that serves
-the page and streams actual responses from the existing Emage API.
+**How Emage works**. Network experiments use a separate Python proxy that streams real responses
+from the Emage API. On the hosted article, enter its URL in **Demo proxy URL**
+and click **Connect**; it is saved for this browser tab.
 
 The comparison's current-level readouts follow each decoded frame and remain
 visible beside the completed timing measurements. The level viewer also reports
@@ -88,7 +114,7 @@ Dark options. System is the default; explicit choices are saved in local storage
 and applied before the page paints. Shared color variables in `css/theme.css`
 keep surfaces, controls, and feedback consistent. The selector stays usable during experiments.
 
-Start the API, then from `Emage-Client` run:
+Start the API, then from `Emage` run:
 
 ```sh
 npm run blog

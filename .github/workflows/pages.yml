@@ -1,0 +1,73 @@
+name: Deploy client to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      wasm_ref:
+        description: Emage-Wasm branch, tag or commit to build
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Checkout client
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Checkout WASM source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository_owner }}/Emage-Wasm
+          ref: ${{ inputs.wasm_ref || vars.WASM_REF || 'main' }}
+          path: .wasm-source
+          persist-credentials: false
+      - name: Compile the WASM codecs
+        run: docker build --target wasm-assets --build-context wasm-source=.wasm-source --output type=local,dest=wasm .
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci
+      - name: Check client and codec integration
+        run: npm test
+      - name: Assemble the public static site
+        run: python3 tools/build_site.py --output _site --wasm-dir wasm
+        env:
+          EMAGE_API_URL: ${{ vars.EMAGE_API_URL }}
+          EMAGE_DEMO_URL: ${{ vars.EMAGE_DEMO_URL }}
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

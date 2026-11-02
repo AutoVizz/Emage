@@ -166,8 +166,8 @@ class DemoHandler(SimpleHTTPRequestHandler):
             return self.throttled(*match.groups())
         if path.startswith('/demo/'):
             return self.json({'error': 'Invalid demo route or network profile.'}, 400)
-        if getattr(self.server, 'transport_only', False):
-            return self.json({'error': 'Transport endpoint only.'}, 404)
+        if getattr(self.server, 'transport_only', False) or getattr(self.server, 'controls_only', False):
+            return self.json({'error': 'Demo endpoint only.'}, 404)
         if any(part.startswith('.') for part in unquote(path).split('/') if part):
             return self.json({'error': 'Not found'}, 404)
         return super().do_GET()
@@ -277,7 +277,7 @@ def normalize_origin(value):
 
 
 def create_servers(state, port, bind='127.0.0.1', public_origin=None,
-                   transport_ports=None, transport_origins=None):
+                   transport_ports=None, transport_origins=None, controls_only=False):
     """Four isolated socket pools, five gallery images each; shared row budgets.
 
     Local runs allocate auxiliary ports automatically. Docker uses fixed ports
@@ -296,6 +296,7 @@ def create_servers(state, port, bind='127.0.0.1', public_origin=None,
     try:
         page = ThreadingHTTPServer((bind, port), DemoHandler)
         page.state, page.daemon_threads, page.transport_only = state, True, False
+        page.controls_only = controls_only
         servers.append(page)
         page_port = page.server_address[1]
         state.allowed_origins = ({public_origin} if public_origin else
@@ -307,6 +308,10 @@ def create_servers(state, port, bind='127.0.0.1', public_origin=None,
                 state.allowed_origins.update(f'{public.scheme}://{host}{suffix}' for host in ('localhost', '127.0.0.1'))
         else:
             public = urlsplit(f'http://127.0.0.1:{page_port}')
+        if controls_only:
+            # The allowed site origin may be GitHub Pages, which does not host
+            # these listeners. Remote deployments supply transport_origins.
+            public = urlsplit(f'http://localhost:{page_port}')
         index = 0
         for name in ('emageOrigins', 'pngOrigins'):
             state.transport[name] = []
@@ -351,6 +356,7 @@ def main():
     parser.add_argument('--transport-ports', help='Four comma-separated listener ports (otherwise allocated automatically).')
     parser.add_argument('--transport-origins', default=os.environ.get('DEMO_TRANSPORT_ORIGINS'), help='Four comma-separated public origins, if different from the listener ports.')
     parser.add_argument('--seed-attempts', type=int, default=1)
+    parser.add_argument('--controls-only', action='store_true', help='Serve demo API endpoints only; host the client separately.')
     parser.add_argument('--skip-seed', action='store_true', help='Use fixtures already uploaded to the API.')
     args = parser.parse_args()
     try:
@@ -361,11 +367,11 @@ def main():
         ports = [int(value) for value in args.transport_ports.split(',')] if args.transport_ports else None
         origins = args.transport_origins.split(',') if args.transport_origins else None
         servers = create_servers(state, args.port, bind=args.bind, public_origin=args.public_origin,
-                                 transport_ports=ports, transport_origins=origins)
+                                 transport_ports=ports, transport_origins=origins, controls_only=args.controls_only)
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f'{error}\nIf the UI port is occupied, pass --port 8085.\n')
     page_origin = args.public_origin or f'http://localhost:{servers[0].server_address[1]}'
-    print(f'Interactive article: {page_origin}/blog.html', flush=True)
+    print(f'Demo controls: http://{args.bind}:{servers[0].server_address[1]}/demo/config' if args.controls_only else f'Interactive article: {page_origin}/blog.html', flush=True)
     print('Four independent gallery origins; each strategy still shares one bandwidth budget.', flush=True)
     for server in servers[1:]:
         thread = threading.Thread(target=server.serve_forever, daemon=True)

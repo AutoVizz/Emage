@@ -66,6 +66,19 @@ class ThrottlingTests(unittest.TestCase):
         self.assertAlmostEqual(max(delays), image['pngBytes'] / (2 * 1024 * 1024))
         cancelled.wait.assert_called_once_with(.03)
 
+    def test_controls_only_mode_does_not_serve_client_or_backend_files(self):
+        for path in ('/blog.html', '/tools/demo_server.py', '/index.html'):
+            handler = self.handler()
+            handler.server.controls_only = True
+            handler.path = path
+            handler.do_GET()
+            self.assertEqual(handler.status, 404)
+        handler = self.handler()
+        handler.server.controls_only = True
+        handler.path = '/demo/config'
+        handler.do_GET()
+        self.assertTrue(json.loads(handler.wfile.getvalue())['ready'])
+
     def test_only_reserved_fixture_paths_are_proxied(self):
         image = self.state.manifest['images'][0]
         self.assertEqual(self.state.source('api', 'image/' + image['serverPath']), 'http://localhost:3233/image/' + image['serverPath'])
@@ -144,6 +157,16 @@ class ThrottlingTests(unittest.TestCase):
         self.assertTrue(all(item.transport_only for item in servers[1:]))
         self.assertIs(servers[1].state.bucket('slow', '12345678', 'gallery-emage'), servers[2].state.bucket('slow', '12345678', 'gallery-emage'))
         self.assertIsNot(servers[1].state.bucket('slow', '12345678', 'gallery-emage'), servers[3].state.bucket('slow', '12345678', 'gallery-png'))
+
+    def test_pages_origin_is_only_used_for_cors_in_controls_only_mode(self):
+        with patch('tools.demo_server.ThreadingHTTPServer', side_effect=lambda address, handler:
+                   SimpleNamespace(server_address=address, server_close=Mock())):
+            create_servers(self.state, 8082, bind='0.0.0.0',
+                           public_origin='https://autovizz.github.io',
+                           transport_ports=[3434, 3435, 3436, 3437], controls_only=True)
+        self.assertEqual(self.state.allowed_origins, {'https://autovizz.github.io'})
+        self.assertEqual(self.state.transport['emageOrigins'], ['http://localhost:3434', 'http://localhost:3435'])
+        self.assertEqual(self.state.transport['pngOrigins'], ['http://localhost:3436', 'http://localhost:3437'])
 
     def test_docker_listeners_advertise_public_origins_and_allow_site_cors(self):
         instances = []

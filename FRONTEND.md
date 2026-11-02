@@ -168,51 +168,33 @@ See `DESIGN.md` for the SEC marker format, key chain, MAC construction, and the
 metadata COM envelope, and `HANDOFF.md` for a snapshot of an in-progress
 debugging session.
 
-To serve the client with Docker, run:
+The hosted client is https://autovizz.github.io/Emage/. Its Pages workflow
+checks out the public `Emage-Wasm` repository, compiles the codecs, runs tests,
+and publishes the allowlisted `_site/` output. Public repository variables
+`EMAGE_API_URL` and `EMAGE_DEMO_URL` set service defaults. No application password
+or backend `.env` is included in the site. Assets and WASM use project-relative
+URLs so `/Emage/` works without root-path rewrites.
 
-```sh
-docker compose up --build -d --remove-orphans
-```
+The optional client-only Docker Compose setup builds WASM from `WASM_SOURCE`
+(default `../EmageWasm`) and publishes a static nginx container on `CLIENT_PORT`
+(default 3433). It does not run backend services. The backend console also defaults
+to local port 3433; use a different `CLIENT_PORT` when running both locally.
 
-Open `http://localhost:3433/` and set the API server URL as needed. nginx
-serves the site and WASM directly without a site login. Set `CLIENT_PORT` to
-change the exposed port. The API is hosted separately.
+The backend deployment independently runs the API (3233), demo controls (8082),
+four allowlisted image-transfer listeners (3434–3437), and the rebuild console
+(3433). Enter the API URL in the workspace. On the article, enter the demo-control
+URL and click Connect. Public HTTPS URLs are required for remote HTTPS clients;
+localhost addresses refer to the browser's machine.
 
-The client image compiles WASM from the sibling `../EmageWasm` checkout.
-Set `WASM_SOURCE` if that checkout is elsewhere. The API server image builds
-independently and only serves API requests.
+`DEMO_PUBLIC_ORIGIN` on the server must match the client origin. For the hosted
+client it is `https://autovizz.github.io`, without `/Emage/`. Cross-origin demo
+configuration, transfer preflights, cancellation and timing headers allow that
+origin. `DEMO_TRANSPORT_ORIGINS` can specify four separate HTTPS transfer origins
+(two Emage followed by two PNG). The article's controls use the configured demo
+origin, independently of GitHub Pages and the four gallery connection pools.
 
-
-The Docker stack includes the blog's demo proxy. Set `EMAGE_UPLOAD_PASSWORD`
-in the client stack's `.env` to the API's upload password, then run
-`docker compose up --build -d --remove-orphans` and open `http://localhost:3433/blog.html`.
-The proxy uploads only the ten reserved public blog fixtures when needed.
-It reaches the API at `http://host.docker.internal:3233` by default;
-`DEMO_API_URL` overrides that internal address.
-
-The page and controls use 3433. Ports 3434–3437 carry only allowlisted public
-sample-image transfers, keeping the gallery's four HTTP/1.1 connection pools
-separate. These transport ports do not expose the client site. Set `DEMO_PUBLIC_ORIGIN` to the browser-visible site
-origin when using a remote hostname. For TLS deployments, proxy the four
-transport origins too; `DEMO_TRANSPORT_ORIGINS` accepts four comma-separated
-public origins (two Emage, then two PNG) when their addresses differ.
-Check `docker compose logs demo` if seeding or API access fails.
-
-
-The standalone deployment provides `/admin`. Enter `EMAGE_UPLOAD_PASSWORD`
-and submit a rebuild request to update the entire application stack from the
-configured GitHub branches. The controller builds images before replacing the
-running services, verifies the result, and restores previous images if startup
-checks fail. Real health failures also trigger a rebuild, with a five-minute
-cooldown and a startup grace period to avoid repeated deployment loops.
-There is no public `/health` or `/healthCheck` endpoint.
-
-Deployment control is a separate private service in the standalone stack; the
-static client and image API do not get Docker access. The controller needs a
-repository-read `GITHUB_TOKEN` in the private deployment `.env`. The ordinary
-client-only Compose stack does not manage or rebuild an external API server.
-
-`EMAGE_UPLOAD_PASSWORD` is the only password setting. It authorizes API uploads,
-deletes and manual rebuilds at `/admin`. A blank password disables those actions;
-site pages and image reads remain public. Store the real password only in the
-private `.env`, never in `.env.example`.
+`/admin` belongs to the backend console, not the static site. The upload password
+authorizes backend builds and recovery of the API and demo proxy. It does not
+rebuild the GitHub Pages client or WASM. Client deployment uses the repository's
+Pages workflow. Server uploads, deletes and manual backend rebuilds all use
+`EMAGE_UPLOAD_PASSWORD`; there is no separate site or admin password.

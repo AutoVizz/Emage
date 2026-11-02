@@ -16,9 +16,18 @@ from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 LOG = logging.getLogger('deployment')
-SERVICES = ('server', 'client', 'demo')
-BUILD_SERVICES = ('server', 'client', 'demo')
-REPOSITORIES = {'SERVER_REF': 'Emage-Server', 'WASM_REF': 'Emage-Wasm', 'CLIENT_REF': 'Emage-Client'}
+SERVICES = ('server', 'demo')
+BUILD_SERVICES = ('server', 'demo')
+REPOSITORIES = {'SERVER_REF': 'Emage-Server', 'CLIENT_REF': 'Emage'}
+ADMIN_FILES = {
+    '/': ('admin.html', 'text/html; charset=utf-8'),
+    '/admin': ('admin.html', 'text/html; charset=utf-8'),
+    '/js/admin.js': ('js/admin.js', 'text/javascript; charset=utf-8'),
+    '/js/theme.js': ('js/theme.js', 'text/javascript; charset=utf-8'),
+    '/css/theme.css': ('css/theme.css', 'text/css; charset=utf-8'),
+    '/css/blog.css': ('css/blog.css', 'text/css; charset=utf-8'),
+}
+ADMIN_ROOT = Path('/usr/share/emage-admin')
 
 
 def read_env(path):
@@ -183,7 +192,7 @@ class Deployment:
             self.progress('resolving', 'Resolving the configured GitHub branches.')
             refs = self.resolve_refs()
             args = [argument for key, commit in refs.items() for argument in ('--build-arg', f'{key}={commit}')]
-            self.progress('building', 'Building the server, WASM, client and blog proxy. Current services stay running.')
+            self.progress('building', 'Building the server and blog proxy. Current backend services stay running.')
             subprocess.run(self.compose('build', *args, *BUILD_SERVICES), check=True, timeout=3600)
             self.progress('deploying', 'Starting the rebuilt application services.')
             targets = list(SERVICES)
@@ -191,7 +200,7 @@ class Deployment:
             subprocess.run(self.compose('up', '-d', '--no-build', '--no-deps', '--force-recreate', *targets), check=True, timeout=180)
             self.progress('verifying', 'Checking the new services.')
             self.wait_ready()
-            self.progress('succeeded', 'The entire application stack is updated and healthy.')
+            self.progress('succeeded', 'The backend is updated and healthy. The client deploys independently through GitHub Pages.')
         except Exception:
             LOG.exception('Deployment failed')
             if deployed and previous:
@@ -249,6 +258,17 @@ class AdminHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == '/ready':
             return self.respond(200, {'ready': True})
+        if path in ADMIN_FILES:
+            relative, content_type = ADMIN_FILES[path]
+            file = ADMIN_ROOT / relative
+            if not file.is_file():
+                return self.respond(404, {'error': 'Not found.'})
+            content = file.read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            return self.wfile.write(content)
         if path != '/admin/api/status':
             return self.respond(404, {'error': 'Not found.'})
         token = self.headers.get('X-Emage-Job-Token', '')
@@ -283,7 +303,7 @@ def main():
     directory = os.environ['ADMIN_PROJECT_DIR']
     project = os.environ['ADMIN_PROJECT_NAME']
     deployment = Deployment(directory, project, os.environ.get('EMAGE_UPLOAD_PASSWORD', ''),
-        os.environ.get('DEMO_PUBLIC_ORIGIN', 'http://localhost:3433'),
+        os.environ.get('ADMIN_PUBLIC_ORIGIN', 'http://localhost:3433'),
         cooldown=int(os.environ.get('ADMIN_REBUILD_COOLDOWN', '300')),
         grace=int(os.environ.get('ADMIN_STARTUP_GRACE', '180')))
     server = ThreadingHTTPServer(('0.0.0.0', 8080), AdminHandler)

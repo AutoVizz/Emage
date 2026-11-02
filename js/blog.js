@@ -1,4 +1,5 @@
 import { Emage } from '../emage.js';
+import { siteConfig } from './config.js';
 import { escapeHtml, fmtBytes } from './common.js';
 
 const $ = selector => document.querySelector(selector);
@@ -23,7 +24,18 @@ const runId = () => {
   return value;
 };
 const sample = selector => manifest.images.find(image => image.id === $(selector).value) || manifest.images[0];
-const url = (path, origin = window.location.origin) => new URL(path, origin).href;
+let demoBase = siteConfig.demoUrl || window.location.origin;
+try { demoBase = window.sessionStorage.getItem('emage.demoUrl') || demoBase; } catch { /* Optional browser storage. */ }
+const url = (path, origin = demoBase) => new URL(path.replace(/^\/+/, ''), origin.replace(/\/+$/, '') + '/').href;
+$('#demoServerUrl').value = demoBase;
+$('#connectDemoServer').onclick = () => {
+  try {
+    const address = new URL($('#demoServerUrl').value.trim());
+    if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password || address.search || address.hash) throw new Error('Enter an HTTP or HTTPS demo proxy URL without credentials, query or fragment.');
+    window.sessionStorage.setItem('emage.demoUrl', address.href.replace(/\/+$/, ''));
+    window.location.reload();
+  } catch (error) { status('bootStatus', error.message, true); }
+};
 const route = (profile, run, lane) => `/demo/net/${profile}/${run}/${lane}`;
 function status(id, text, error = false) {
   const element = $('#' + id);
@@ -45,7 +57,8 @@ function client(image, suppliedKey, profile, run, lane, origin) {
 }
 function sync() {
   document.querySelectorAll('button, input, select').forEach(element => {
-    if (!element.matches('[data-theme-select]')) element.disabled = !ready || busy;
+    if (element.matches('[data-demo-connection]')) element.disabled = busy;
+    else if (!element.matches('[data-theme-select]')) element.disabled = !ready || busy;
   });
   document.querySelectorAll('[data-layer-view]').forEach(button => {
     button.disabled = !ready || busy || !layerCache || Number(button.dataset.layerView) > layerCache.end;
@@ -377,7 +390,7 @@ try {
   ownerKeys();
   const origins = [...(transport?.emageOrigins || []), ...(transport?.pngOrigins || [])];
   ready = Boolean(config?.ready && config?.images === 10 && config?.profiles?.demo?.bytesPerSecond === 2 * 1024 * 1024 && transport?.emageOrigins?.length === 2 && transport?.pngOrigins?.length === 2 && new Set(origins).size === 4 && origins.every(origin => new URL(origin).origin !== window.location.origin));
-  status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'The demo proxy is not ready. For Docker, check the demo service logs, correct its API URL or upload password, and restart it, then reload. The proxy needs the 2 MiB/s profile and independent gallery connections. For a local run, use npm run blog and open http://localhost:8082/blog.html.', !ready);
+  status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Connect to the separate demo proxy above to run the experiments. For Docker, use its public URL (locally http://localhost:8082) and check its API URL, upload password and allowed site origin; restart the proxy after changing its settings. The proxy needs the 2 MiB/s profile and independent gallery connections. A local article server can also be started with npm run blog.', !ready);
 } catch (error) {
   status('bootStatus', 'Demo setup failed: ' + Emage.messageOf(error), true);
 }

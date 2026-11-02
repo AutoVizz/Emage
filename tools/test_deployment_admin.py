@@ -111,7 +111,7 @@ class AdminTests(unittest.TestCase):
 
     def test_git_refs_are_resolved_without_passing_the_token_in_command_arguments(self):
         (Path(self.directory.name) / '.env').write_text('GITHUB_TOKEN=test-token\n')
-        commits = ['a' * 40, 'b' * 40, 'c' * 40]
+        commits = ['a' * 40, 'b' * 40]
         calls = []
         def remote(command, **options):
             self.assertNotIn('test-token', ' '.join(command))
@@ -123,13 +123,13 @@ class AdminTests(unittest.TestCase):
         with patch('tools.deployment_admin.subprocess.check_output', side_effect=remote):
             refs = self.deployment.resolve_refs()
         self.assertEqual(list(refs.values()), commits)
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 2)
 
     def prepare_rebuild(self):
         self.deployment.job = {'token': 'token', 'state': 'queued'}
         self.deployment.active = True
         self.deployment.containers = Mock(return_value={name: {'Image': 'sha256:old-' + name} for name in SERVICES})
-        self.deployment.resolve_refs = Mock(return_value={'SERVER_REF': 'a' * 40, 'WASM_REF': 'b' * 40, 'CLIENT_REF': 'c' * 40})
+        self.deployment.resolve_refs = Mock(return_value={'SERVER_REF': 'a' * 40, 'CLIENT_REF': 'b' * 40})
         self.deployment.failures = Mock(return_value=[])
         self.deployment.wait_ready = Mock()
 
@@ -141,7 +141,8 @@ class AdminTests(unittest.TestCase):
         self.assertIn('build', commands[0])
         self.assertIn('up', commands[1])
         self.assertNotIn('admin', commands[1])
-        self.assertEqual(commands[1][-3:], ['server', 'client', 'demo'])
+        self.assertEqual(commands[1][-2:], ['server', 'demo'])
+        self.assertNotIn('client', commands[0])
         self.assertEqual(self.deployment.job['state'], 'succeeded')
         self.assertFalse(self.deployment.active)
 
@@ -164,13 +165,26 @@ class AdminTests(unittest.TestCase):
                 files = [command[index + 1] for index, item in enumerate(command) if item == '-f']
                 override = json.loads(Path(files[-1]).read_text())
                 self.assertEqual(override['services']['server']['image'], 'sha256:old-server')
-                self.assertEqual(override['services']['client']['pull_policy'], 'never')
+                self.assertEqual(override['services']['demo']['pull_policy'], 'never')
         with patch('tools.deployment_admin.subprocess.run', side_effect=execute), self.assertLogs('deployment', level='ERROR'):
             self.deployment.rebuild()
         self.assertEqual(len(commands), 3)
         self.assertEqual(self.deployment.wait_ready.call_count, 2)
         self.assertIn('restored', self.deployment.job['message'])
         self.assertEqual(self.deployment.job['state'], 'failed')
+
+    def test_admin_ui_is_served_by_the_backend_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'admin.html').write_text('<html>Upload password</html>')
+            with patch('tools.deployment_admin.ADMIN_ROOT', root):
+                handler = self.handler(path='/admin')
+                handler.do_GET()
+                self.assertEqual(handler.status, 200)
+                self.assertIn(b'Upload password', handler.wfile.getvalue())
+                handler = self.handler(path='/.env')
+                handler.do_GET()
+                self.assertEqual(handler.status, 404)
 
     def test_no_public_health_or_legacy_admin_route(self):
         for path in ['/health', '/healthCheck']:

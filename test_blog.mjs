@@ -142,7 +142,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === '/demo/config') return configured ? json({ ready: true, images: 10, profiles: configured === 'old-profiles' ? {} : { demo: { bytesPerSecond: 2 * 1024 * 1024 } }, ...(configured === 'legacy' ? {} : { transport }) }) : new Response('No proxy', { status: 404 });
   if (url.pathname.startsWith('/demo/cancel/')) {
     assert.equal(options.method, 'POST');
-    assert.equal(url.origin, window.location.origin, 'Stop uses a control origin outside gallery pools');
+    assert.equal(url.origin, new URL(window.sessionStorage.getItem('emage.demoUrl') || window.location.origin).origin, 'Stop uses the configured control origin outside gallery pools');
     cancelledRuns.push(url.pathname.split('/').at(-1));
     return json({ stopped: true });
   }
@@ -197,9 +197,10 @@ function change(selector, value) {
   $(selector).value = value;
   $(selector).dispatchEvent(new dom.window.Event('change', { bubbles: true }));
 }
-async function open() {
+async function open({ pageUrl = 'http://localhost:8082/blog.html', proxyUrl = '' } = {}) {
   dom?.window.close();
-  dom = new JSDOM(readFileSync(new URL('blog.html', root), 'utf8'), { url: 'http://localhost:8082/blog.html' });
+  dom = new JSDOM(readFileSync(new URL('blog.html', root), 'utf8'), { url: pageUrl });
+  if (proxyUrl) dom.window.sessionStorage.setItem('emage.demoUrl', proxyUrl);
   globalThis.document = dom.window.document;
   globalThis.window = dom.window;
   dom.window.HTMLCanvasElement.prototype.getContext = function () {
@@ -448,3 +449,14 @@ assert.match($('#bootStatus').textContent, /restart.*2 MiB\/s/);
 dom.window.close();
 console.log('PASS blog setup: plain static hosting leaves readable article and explains the missing proxy');
 console.log('ALL BLOG CHECKS PASSED');
+
+configured = true;
+await open({ pageUrl: 'https://autovizz.github.io/Emage/blog.html', proxyUrl: 'https://demo.example' });
+assert.match($('#bootStatus').textContent, /Experiments ready/);
+assert.equal($('#demoServerUrl').value, 'https://demo.example');
+requests = [];
+await click('#layerRun');
+assert.equal($('#layerStatus').classList.contains('error'), false, $('#layerStatus').textContent);
+assert.ok(requests.length > 0);
+assert.ok(requests.every(request => request.origin === 'https://demo.example'), 'Pages loads image windows from the separately configured backend');
+console.log('PASS Pages: project-path article connects to a separate demo control origin');

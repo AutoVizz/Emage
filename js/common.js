@@ -1,4 +1,5 @@
 import { Emage } from '../emage.js';
+import { siteConfig } from './config.js';
 export { Emage };
 export const $ = (s, root = document) => root.querySelector(s);
 /* Shared helpers, data and sidebar for every Emage page. */
@@ -83,6 +84,7 @@ export class Page {
     renderSidebar();
     hydrateIcons();
     const saved = readStore('emage.connection.v1', {}, sessionStorage);
+    if (!saved.baseUrl && siteConfig.apiUrl) $('#serverUrl').value = siteConfig.apiUrl;
     for (const [id, name] of [['serverUrl', 'baseUrl'], ['imgPath', 'imagePath'], ['keyInput', 'key']]) {
       if (typeof saved[name] === 'string') $('#' + id).value = saved[name];
       $('#' + id).addEventListener('change', () => { this.remember(); this.updateHost(id === 'serverUrl' ? false : undefined); });
