@@ -36,7 +36,12 @@ $('#connectDemoServer').onclick = () => {
     window.location.reload();
   } catch (error) { status('bootStatus', error.message, true); }
 };
-const route = (profile, run, lane) => `/demo/net/${profile}/${run}/${lane}`;
+const shapingHeaders = (profile, run, lane) => connectionProfiles[profile] ? ({
+  'X-Demo-Latency-Ms': String(connectionProfiles[profile].latencyMs),
+  'X-Demo-Bytes-Per-Second': String(connectionProfiles[profile].bytesPerSecond),
+  'X-Demo-Run': run, 'X-Demo-Lane': lane,
+}) : {};
+let connectionProfiles = {};
 function status(id, text, error = false) {
   const element = $('#' + id);
   element.textContent = text;
@@ -51,7 +56,7 @@ function client(image, suppliedKey, profile, run, lane, origin) {
   const out = new Emage();
   out.encoder = engine.encoder;
   out.decoder = engine.decoder;
-  out.setServer({ baseUrl: url(route(profile, run, lane) + '/api', origin), imagePath: image.serverPath.split('/').map(encodeURIComponent).join('/') });
+  out.setServer({ baseUrl: origin || demoBase, headers: shapingHeaders(profile, run, lane), imagePath: image.serverPath.split('/').map(encodeURIComponent).join('/') });
   out.setCrypto({ key: key(suppliedKey), iv: null, accessLevel: 'all' });
   return out;
 }
@@ -224,47 +229,61 @@ $('#galleryRun').onclick = () => run('galleryStatus', 'Loading the two galleries
       throw error;
     }
   });
-  // Ordinary <img> loads, not fetch-then-paint or fake progress indicators.
-  const originals = manifest.images.map((image, index) => new Promise((resolve, reject) => {
-    const img = document.createElement('img');
-    img.alt = image.title + ' full-size PNG displayed as a thumbnail';
-    img.decoding = 'async';
-    img.crossOrigin = 'anonymous';
-    const source = url(route(profile, run, 'gallery-png') + '/png/' + image.id + '.png', transport.pngOrigins[index % 2]);
-    const cleanup = () => {
-      signal.removeEventListener('abort', abort);
-      img.onload = img.onerror = null;
-    };
-    const abort = () => {
-      cleanup();
-      img.removeAttribute('src');
-      $('#pngState' + index).textContent = 'Stopped';
-      reject(signal.reason);
-    };
-    signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) return abort();
-    img.onload = () => {
-      cleanup();
-      $('#pngSurface' + index).classList.add('has-frame');
-      visible('png', index);
-      const timing = performance.getEntriesByName?.(source).at(-1);
-      // Same-origin resource timing where available; otherwise the exact PNG
-      // file length declared in the generated/verified fixture manifest.
-      const bytes = timing?.encodedBodySize || image.pngBytes;
-      $('#pngState' + index).textContent = `${ms(performance.now() - start)} · ${fmtBytes(bytes)}`;
-      complete('png', bytes);
-      resolve();
-    };
-    img.onerror = () => {
-      cleanup();
-      totals.png.failed++;
-      $('#pngState' + index).textContent = 'Image request failed';
-      summary('png');
-      reject(new Error('PNG image request failed.'));
-    };
-    $('#pngSurface' + index).append(img);
-    img.src = source;
-  }));
+  // Fetch full PNG bodies so both rows can send the same shaping headers.
+  const originals = manifest.images.map(async (image, index) => {
+    const source = url('/demo/png/' + image.id + '.png', transport.pngOrigins[index % 2]);
+    let blobUrl;
+    try {
+      const response = await fetch(source, { headers: shapingHeaders(profile, run, 'gallery-png'), signal });
+      if (!response.ok) throw new Error('PNG request failed: HTTP ' + response.status);
+      const blob = await response.blob();
+      signal.throwIfAborted();
+      blobUrl = URL.createObjectURL(blob);
+      await new Promise((resolve, reject) => {
+        const img = document.createElement('img');
+        img.alt = image.title + ' full-size PNG displayed as a thumbnail';
+        img.decoding = 'async';
+        img.crossOrigin = 'anonymous';
+        const cleanup = () => {
+          signal.removeEventListener('abort', abort);
+          img.onload = img.onerror = null;
+        };
+        const abort = () => {
+          cleanup();
+          img.removeAttribute('src');
+          $('#pngState' + index).textContent = 'Stopped';
+          reject(signal.reason);
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) return abort();
+        img.onload = () => {
+          cleanup();
+          $('#pngSurface' + index).classList.add('has-frame');
+          visible('png', index);
+          const bytes = blob.size;
+          $('#pngState' + index).textContent = `${ms(performance.now() - start)} · ${fmtBytes(bytes)}`;
+          complete('png', bytes);
+          resolve();
+        };
+        img.onerror = () => {
+          cleanup();
+          reject(new Error('PNG image request failed.'));
+        };
+        $('#pngSurface' + index).append(img);
+        img.src = blobUrl;
+      });
+    } catch (error) {
+      if (signal.aborted) $('#pngState' + index).textContent = 'Stopped';
+      else {
+        totals.png.failed++;
+        $('#pngState' + index).textContent = 'Failed: ' + Emage.messageOf(error);
+        summary('png');
+      }
+      throw error;
+    } finally {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    }
+  });
   const results = await Promise.allSettled([...progressive, ...originals]);
   signal.throwIfAborted();
   const failures = results.filter(result => result.status === 'rejected').length;
@@ -379,6 +398,7 @@ try {
   engine = loadedEngine;
   manifest = loadedManifest;
   transport = config?.transport;
+  connectionProfiles = config?.profiles || {};
   if (manifest.images.length !== 10 || new Set(manifest.images.map(image => image.pixelSha256)).size !== 10) throw new Error('The gallery requires ten distinct sample images. Rebuild demo assets.');
   document.querySelectorAll('[data-image-select]').forEach(select => { select.innerHTML = manifest.images.map(image => `<option value="${image.id}">${escapeHtml(image.title)}</option>`).join(''); });
   document.querySelectorAll('[data-speed-select]').forEach(select => {
@@ -389,8 +409,8 @@ try {
   clearLayers();
   ownerKeys();
   const origins = [...(transport?.emageOrigins || []), ...(transport?.pngOrigins || [])];
-  ready = Boolean(config?.ready && config?.images === 10 && config?.profiles?.demo?.bytesPerSecond === 2 * 1024 * 1024 && transport?.emageOrigins?.length === 2 && transport?.pngOrigins?.length === 2 && new Set(origins).size === 4 && origins.every(origin => new URL(origin).origin !== window.location.origin));
-  status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Connect to the separate demo proxy above to run the experiments. For Docker, use its public URL (locally http://localhost:8082) and check its API URL, upload password and allowed site origin; restart the proxy after changing its settings. The proxy needs the 2 MiB/s profile and independent gallery connections. A local article server can also be started with npm run blog.', !ready);
+  ready = Boolean(config?.ready && config?.images === 10 && config?.shaping === 'headers' && config?.profiles?.demo?.bytesPerSecond === 2 * 1024 * 1024 && transport?.emageOrigins?.length === 2 && transport?.pngOrigins?.length === 2 && new Set(origins).size === 4 && origins.every(origin => new URL(origin).origin !== window.location.origin));
+  status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Connect to the separate demo proxy above to run the experiments. For Docker, use its public URL (locally http://localhost:443) and check its API URL, upload password and allowed site origin; restart the proxy after changing its settings. The proxy needs the 2 MiB/s profile and independent gallery connections. Cloudflare Tunnel should route the API hostname and gallery subdomains to http://localhost:443. For a local proxy, use npm run blog.', !ready);
 } catch (error) {
   status('bootStatus', 'Demo setup failed: ' + Emage.messageOf(error), true);
 }

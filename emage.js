@@ -191,7 +191,7 @@ export class Emage {
     constructor(options = {}) {
         this.encoder = null;
         this.decoder = null;
-        this.server = { baseUrl: '', imagePath: '', password: '' };
+        this.server = { baseUrl: '', imagePath: '', password: '', headers: {} };
         // accessLevel is the highest DWT resolution level the caller may read,
         // counted coarse-first (0 = the 1-pixel approximation). The granular key
         // chain K0..K_accessLevel is derived backwards from K_accessLevel, so a smaller
@@ -254,6 +254,7 @@ export class Emage {
         if (config.baseUrl !== undefined) this.server.baseUrl = String(config.baseUrl).trim();
         if (config.imagePath !== undefined) this.server.imagePath = String(config.imagePath).trim();
         if (config.password !== undefined) this.server.password = String(config.password).trim();
+        if (config.headers !== undefined) this.server.headers = Object.fromEntries(new Headers(config.headers));
         return this;
     }
 
@@ -657,7 +658,7 @@ setCrypto(config = {}) {
 
     async _fetchWindow(spec, imagePath, signal) {
         checkAbort(signal);
-        const resp = await fetch(this._imageUrl(imagePath), { headers: { 'X-Emage-Layers': spec }, signal });
+        const resp = await fetch(this._imageUrl(imagePath), { headers: { ...this.server.headers, 'X-Emage-Layers': spec }, signal });
         const body = await resp.arrayBuffer();
         checkAbort(signal);
         if (!resp.ok) {
@@ -754,7 +755,7 @@ setCrypto(config = {}) {
 
     async meta(opts = {}) {
         checkAbort(opts.signal);
-        const resp = await fetch(this._imageUrl(opts.imagePath), { headers: { 'X-Emage-Layers': 'meta' }, signal: opts.signal });
+        const resp = await fetch(this._imageUrl(opts.imagePath), { headers: { ...this.server.headers, 'X-Emage-Layers': 'meta' }, signal: opts.signal });
         const data = await parseJson(resp);
         checkAbort(opts.signal);
         if (!resp.ok) {

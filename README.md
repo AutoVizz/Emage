@@ -114,37 +114,38 @@ Dark options. System is the default; explicit choices are saved in local storage
 and applied before the page paints. Shared color variables in `css/theme.css`
 keep surfaces, controls, and feedback consistent. The selector stays usable during experiments.
 
-Start the API, then from `Emage` run:
+Start the separate backend deployment and open the Pages article. Connect it
+to the public HTTPS proxy hostname. For local proxy development, generate the
+fixtures and run `python3 tools/demo_server.py --port 8443`; serve the static
+client separately. The Docker deployment uses Python port 443 and .NET port 3233.
 
-```sh
-npm run blog
-```
+Cloudflare Tunnel terminates public HTTPS and forwards the API hostname and all
+gallery subdomains to **http://localhost:443**. The proxy accepts every Host
+and uses one fixed .NET upstream. It forwards reads, uploads and deletes,
+including the upload password header and packet framing headers.
 
-Open `http://localhost:8082/blog.html`. This command builds/verifies ten distinct
-sample image pairs, uploads missing samples to `blog-demo/v1/` on the real API,
-and starts the article server. Uploads use `EMAGE_UPLOAD_PASSWORD` from the
-environment or `Emage-Server/.env`; the password is not placed in any served file.
-The sample master keys and PNG originals are deliberately public demonstration
-data. Existing user image paths are not modified.
+Shaping is opt-in through request headers:
 
-The generated assets are included, so the server can also be started directly:
+| Header | Meaning |
+| --- | --- |
+| `X-Demo-Latency-Ms` | Added delay per request, 0–10000 ms |
+| `X-Demo-Bytes-Per-Second` | Response-body rate; 0 or absent means unlimited |
+| `X-Demo-Run`, `X-Demo-Lane` | Optional run and strategy identifiers for a shared bandwidth budget |
 
-```sh
-python3 tools/demo_server.py --port 8085 --api http://localhost:3233
-```
+With no shaping headers, the proxy adds no artificial delay or rate limit.
+The blog sends these headers for its selected connection profile. URLs contain
+only the resource path; run identifiers and network settings stay in headers.
+No cache-busting URLs are generated.
 
-Use `--skip-seed` only when these fixtures are already present on that API.
-A plain static server displays the article, but disables network experiments
-with instructions to start the proxy. The proxy listens on loopback, accepts
-only GETs for the known sample images plus a local run-cancellation endpoint,
-and forwards no decryption keys. Restart the proxy after updating it; an older
-single-origin proxy cannot run the revised gallery experiment.
+The ten sample PNG/J2K pairs and sample keys are deliberately public. The proxy
+seeds only reserved `blog-demo/v1/` API paths using `EMAGE_UPLOAD_PASSWORD` from
+its private environment. It never puts the password in browser assets.
 
 The page has a conventional article layout, with experiments embedded between
 the explanatory sections. Experiments run one at a time so timings do not
 silently compete with another experiment. A **Stop experiment** control stays
 available during a run. It aborts metadata/packet fetches, removes unfinished
-PNG image sources, interrupts paint waits, and tells the proxy to cancel that
+PNG fetches and image display, interrupts paint waits, and tells the proxy to cancel that
 run's reserved bandwidth. Then all settings and other experiments unlock.
 WASM decoding is synchronous; Stop takes effect when the current decode yields
 back to the browser. Cancelled runs keep completed frames and report **stopped**,
@@ -155,7 +156,7 @@ never successful completion.
   sequentially; results include first frame, completion, image-body bytes,
   requests, and final decoded dimensions.
 - The gallery starts ten different Emage loads and ten corresponding normal
-  PNG `<img>` loads concurrently. The Emage counter records first decoded
+  PNG full-body fetches concurrently, then displays each body in an `<img>`. The Emage counter records first decoded
   previews; the PNG counter records load events, not browser-dependent partial
   PNG paints. Each row shares one bandwidth budget, so
   ten connections do not receive ten times the configured speed. PNG body sizes
@@ -169,25 +170,22 @@ Profiles add body pacing plus a per-request delay: 96 KiB/s + 180 ms,
 512 KiB/s + 60 ms, 2 MiB/s + 30 ms (the default Demo profile), and
 4 MiB/s + 20 ms. Each run/strategy has its own budget.
 Browser scheduling, CPU, TCP behavior, packet loss, and real mobile-network
-conditions are not emulated. Responses use `Cache-Control: no-store` and fresh
-run URLs; codec startup is outside measured intervals.
+conditions are not emulated. Codec startup is outside measured intervals.
 
-The proxy is HTTP/1.1. Putting twenty requests on one origin allowed six long
-PNG requests to occupy Chrome's connection pool and starve Emage's subsequent
-resolution requests. Starting promises or moving code to workers does not
-remove that transport limit. The revised gallery uses four independent local
-origins: two per row, five images per origin. Auxiliary ports are allocated by
-the OS to avoid conflicts; the main page/control port remains 8082 by default.
-All four servers share the same bandwidth state, keyed by run and strategy,
-so using two origins does not double a row's throughput. CORS permits only the
-article origin and exposes the required framing and timing headers. Ordinary
-PNG `<img>` loading is preserved; no fetch-to-blob conversion is involved.
+The gallery uses four subdomain origins (two per row), all through the same
+Python port 443. By default an API host `api.example.com` advertises
+`e1.example.com`, `e2.example.com`, `p1.example.com` and `p2.example.com`.
+Route those names, or a wildcard, through Cloudflare Tunnel to the same origin.
+`DEMO_TRANSPORT_ORIGINS` can override all four public origins. Every request
+shares process-wide budgets keyed by its rate, run and strategy, so subdomains
+do not multiply a row's bandwidth. CDN and browser connection scheduling still
+apply; subdomains do not guarantee separate HTTP/2 connections.
 
-This is a deliberately sharded HTTP/1.1 experiment, not single-origin HTTP/2.
-Browser-wide connection limits and CPU still apply. Application request counts
-cover metadata/packet GETs, not browser-generated CORS preflights. The Stop
-endpoint uses the main origin so it is not queued behind the gallery transfers.
-See [Chrome's connection queueing documentation](https://developer.chrome.com/docs/devtools/network/reference/).
+PNG requests use fetch so they can send shaping headers, then display the full
+body through an object URL. PNG timing therefore measures full-body download
+plus image decoding, not native progressive PNG painting. Stop cancels the
+fetches and each run's server budget. CORS preflights are not counted as image
+requests in the article's application telemetry.
 
 Both sample formats are lossless. They depict original procedural artworks,
 not a photographic benchmark. Their full J2K files are larger than their PNGs;

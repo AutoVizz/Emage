@@ -100,7 +100,8 @@ function slice(image, first, last) {
 let dom, requests = [], active = 0, peak = 0, configured = true;
 let blockRequest = () => false;
 const held = new Set(), cancelledRuns = [];
-const transport = { emageOrigins: ['http://127.0.0.1:18001', 'http://127.0.0.1:18002'], pngOrigins: ['http://127.0.0.1:18003', 'http://127.0.0.1:18004'] };
+const transport = { emageOrigins: ['https://e1.example.com', 'https://e2.example.com'], pngOrigins: ['https://p1.example.com', 'https://p2.example.com'] };
+const profiles = { slow: { bytesPerSecond: 96 * 1024, latencyMs: 180 }, balanced: { bytesPerSecond: 512 * 1024, latencyMs: 60 }, demo: { bytesPerSecond: 2 * 1024 * 1024, latencyMs: 30 }, fast: { bytesPerSecond: 4 * 1024 * 1024, latencyMs: 20 } };
 const pools = new Map(), originPeaks = new Map();
 async function connection(origin, signal) {
   signal?.throwIfAborted();
@@ -139,20 +140,25 @@ const json = value => new Response(JSON.stringify(value));
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input);
   if (url.pathname.endsWith('/demo-assets/manifest.json')) return json(manifest);
-  if (url.pathname === '/demo/config') return configured ? json({ ready: true, images: 10, profiles: configured === 'old-profiles' ? {} : { demo: { bytesPerSecond: 2 * 1024 * 1024 } }, ...(configured === 'legacy' ? {} : { transport }) }) : new Response('No proxy', { status: 404 });
+  if (url.pathname === '/demo/config') return configured ? json({ ready: true, images: 10, shaping: 'headers', profiles: configured === 'old-profiles' ? {} : profiles, ...(configured === 'legacy' ? {} : { transport }) }) : new Response('No proxy', { status: 404 });
   if (url.pathname.startsWith('/demo/cancel/')) {
     assert.equal(options.method, 'POST');
     assert.equal(url.origin, new URL(window.sessionStorage.getItem('emage.demoUrl') || window.location.origin).origin, 'Stop uses the configured control origin outside gallery pools');
     cancelledRuns.push(url.pathname.split('/').at(-1));
     return json({ stopped: true });
   }
-  const match = /^\/demo\/net\/([^/]+)\/([^/]+)\/([^/]+)\/(api|png)\/(.+)$/.exec(url.pathname);
-  assert.ok(match, 'all demo image traffic uses the throttle proxy: ' + url.pathname);
-  const [, profile, run, lane, kind, resource] = match;
-  assert.ok(['slow', 'balanced', 'demo', 'fast'].includes(profile));
+  const kind = url.pathname.startsWith('/demo/png/') ? 'png' : 'api';
+  assert.ok(kind === 'png' || url.pathname.startsWith('/image/'), 'image URLs have no shaping controls');
+  const resource = kind === 'png' ? url.pathname.slice('/demo/png/'.length) : url.pathname.slice(1);
+  const headers = new Headers(options.headers);
+  const run = headers.get('X-Demo-Run'), lane = headers.get('X-Demo-Lane');
+  const profile = Object.keys(profiles).find(name => profiles[name].bytesPerSecond === Number(headers.get('X-Demo-Bytes-Per-Second')));
+  assert.ok(profile, 'rate comes from a shaping header');
+  assert.equal(Number(headers.get('X-Demo-Latency-Ms')), profiles[profile].latencyMs);
+  assert.match(run, /^[a-f0-9]{8,32}$/);
   assert.equal(options.method ?? 'GET', 'GET');
-  assert.deepEqual(Object.keys(options.headers || {}), kind === 'api' ? ['X-Emage-Layers'] : [], 'no keys, passwords, or IVs are transmitted in headers');
-  const record = { origin: url.origin, profile, run, lane, kind, resource, signal: options.signal, range: options.headers?.['X-Emage-Layers'], renderedFrames: lane === 'layers' ? document.querySelectorAll('#layerTimeline li').length : null };
+  assert.deepEqual([...headers.keys()].sort(), [...['x-demo-bytes-per-second', 'x-demo-latency-ms', 'x-demo-run', 'x-demo-lane'], ...(kind === 'api' ? ['x-emage-layers'] : [])].sort(), 'only shaping and layer headers are sent');
+  const record = { origin: url.origin, profile, run, lane, kind, resource, signal: options.signal, range: headers.get('X-Emage-Layers'), renderedFrames: lane === 'layers' ? document.querySelectorAll('#layerTimeline li').length : null };
   requests.push(record);
   const release = await connection(url.origin, options.signal);
   peak = Math.max(peak, ++active);
@@ -211,10 +217,9 @@ async function open({ pageUrl = 'http://localhost:8082/blog.html', proxyUrl = ''
   Object.defineProperty(dom.window.HTMLImageElement.prototype, 'src', {
     configurable: true,
     set(value) {
-      this.download?.abort();
-      this.download = new AbortController();
+      assert.ok(value.startsWith('blob:'), 'PNG rendering uses the fetched full body');
       this.setAttribute('src', value);
-      fetch(value, { signal: this.download.signal }).then(response => response.arrayBuffer()).then(() => this.onload?.()).catch(() => this.onerror?.());
+      setImmediate(() => this.onload?.());
     },
     get() { return this.getAttribute('src'); },
   });
@@ -249,7 +254,7 @@ originPeaks.clear();
 blockRequest = request => request.kind === 'png';
 $('#galleryRun').click();
 await until(() => held.size === 10 && /10\/10 complete/.test($('#emageSummary').textContent));
-assert.equal($('#pngGallery img').getAttribute('src') !== null, true);
+assert.equal($('#pngGallery img'), null, 'PNG rendering waits for the full response body');
 assert.equal($('main').getAttribute('aria-busy'), 'true');
 assert.equal($('[data-theme-select]').disabled, false, 'theme remains available during an experiment');
 assert.match($('#pngSummary').textContent, /0\/10 loaded/);

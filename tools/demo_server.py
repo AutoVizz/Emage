@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Serve the article and shape real response bodies from the existing Emage API.
-
-Each (run, lane, profile) has ONE shared byte budget, including all ten gallery
-requests. Each competing strategy gets its own identical budget. This is a
-proxy with fixed upstream and fixture allowlists. It binds to loopback by default;
-Docker can expose its four transport listeners separately from the static site.
-"""
+"""Forward all hosts to the Emage API; shape responses only when headers request it."""
 import argparse
 import http.client
 import json
@@ -14,7 +8,7 @@ from pathlib import Path
 import re
 import threading
 import time
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlsplit
 from urllib.request import Request, urlopen
@@ -30,7 +24,8 @@ RESPONSE_HEADERS = (
     'Content-Type', 'Content-Length', 'X-Emage-Framing', 'X-Emage-Layers',
     'X-Emage-TotalLayers', 'X-Emage-RemainingLayers', 'X-Emage-TilePsotOffsets',
 )
-ROUTE = re.compile(r'^/demo/net/(slow|balanced|demo|fast)/([a-f0-9]{8,32})/([a-z0-9-]{1,24})/(api|png)/(.+)$')
+CONTROL_HEADERS = ('X-Demo-Latency-Ms', 'X-Demo-Bytes-Per-Second', 'X-Demo-Run', 'X-Demo-Lane')
+HOP_HEADERS = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade'}
 CANCEL_ROUTE = re.compile(r'^/demo/cancel/([a-f0-9]{8,32})$')
 
 
@@ -90,31 +85,23 @@ class DemoState:
     def cancel(self, run):
         self.run_event(run).set()
 
-    def bucket(self, profile, run, lane):
-        key = (profile, run, lane)
+    def bucket(self, rate, run, lane):
+        key = (rate, run, lane)
         with self.lock:
             now = time.monotonic()
             self.buckets = {k: v for k, v in self.buckets.items() if now - v.touched < 600 or v.next_time > now}
             if key not in self.buckets:
                 if len(self.buckets) >= 512:
                     raise RuntimeError('Too many active demo runs. Wait for previous runs to finish.')
-                self.buckets[key] = SharedBandwidth(PROFILES[profile]['bytesPerSecond'], cancelled=self.run_event(run))
+                self.buckets[key] = SharedBandwidth(rate, cancelled=self.run_event(run) if run else None)
             return self.buckets[key]
 
-    def source(self, kind, resource):
-        resource = unquote(resource)
-        if kind == 'api' and resource.startswith('image/') and resource[6:] in self.images:
-            return self.api + '/image/' + quote(resource[6:], safe='/')
-        if kind == 'png' and resource in self.pngs:
-            return self.pngs[resource]
-        raise ValueError('Only the ten public blog fixtures can be requested through this proxy.')
-
-
-class DemoHandler(SimpleHTTPRequestHandler):
+class DemoHandler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(ROOT), **kwargs)
+    def log_message(self, format, *args):
+        # Never log passwords or shaping headers.
+        super().log_message(format, *args)
 
     def end_headers(self):
         origin = self.headers.get('Origin')
@@ -125,104 +112,180 @@ class DemoHandler(SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Expose-Headers', ', '.join(RESPONSE_HEADERS))
         super().end_headers()
 
-    def do_HEAD(self):
-        if getattr(self.server, 'transport_only', False):
-            return self.send_error(405)
-        return super().do_HEAD()
+    def json(self, data, status=200):
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
+
+    def shaping(self):
+        def number(name, maximum):
+            raw = self.headers.get(name)
+            if raw is None:
+                return 0
+            if not raw.isascii() or not raw.isdigit() or not 0 <= int(raw) <= maximum:
+                raise ValueError(f'{name} must be an integer between 0 and {maximum}.')
+            return int(raw)
+        latency = number('X-Demo-Latency-Ms', 10000)
+        rate = number('X-Demo-Bytes-Per-Second', 100 * 1024 * 1024)
+        run, lane = self.headers.get('X-Demo-Run', ''), self.headers.get('X-Demo-Lane', '')
+        if run and not re.fullmatch(r'[a-f0-9]{8,32}', run):
+            raise ValueError('Invalid X-Demo-Run.')
+        if lane and not re.fullmatch(r'[a-z0-9-]{1,24}', lane):
+            raise ValueError('Invalid X-Demo-Lane.')
+        if bool(run) != bool(lane):
+            raise ValueError('Supply X-Demo-Run and X-Demo-Lane together.')
+        # Ungrouped requests never share a bandwidth budget accidentally.
+        bucket = (self.server.state.bucket(rate, run, lane) if run else SharedBandwidth(rate)) if rate else None
+        cancelled = self.server.state.run_event(run) if run else None
+        return latency, rate, bucket, cancelled
 
     def do_OPTIONS(self):
-        if not ROUTE.fullmatch(urlsplit(self.path).path) or self.headers.get('Origin') not in self.server.state.allowed_origins:
-            return self.json({'error': 'Origin or path not allowed.'}, 403)
+        if self.headers.get('Origin') not in self.server.state.allowed_origins:
+            return self.proxy()
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'X-Emage-Layers')
+        self.send_header('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', ', '.join(('Content-Type', 'X-Emage-Layers', 'X-Emage-Password', *CONTROL_HEADERS)))
         self.send_header('Access-Control-Max-Age', '600')
         self.send_header('Content-Length', '0')
         self.end_headers()
 
     def do_POST(self):
         match = CANCEL_ROUTE.fullmatch(urlsplit(self.path).path)
+        if not match:
+            return self.proxy()
         origin = self.headers.get('Origin')
-        if not match or getattr(self.server, 'transport_only', False) or (origin and origin not in self.server.state.allowed_origins):
-            return self.json({'error': 'Not allowed.'}, 403)
+        if origin and origin not in self.server.state.allowed_origins:
+            return self.json({'error': 'Origin not allowed.'}, 403)
         self.server.state.cancel(match[1])
         return self.json({'stopped': True})
 
-    def json(self, data, status=200):
-        body = json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store')
-        self.end_headers()
-        self.wfile.write(body)
-
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path == '/demo/config' and not getattr(self.server, 'transport_only', False):
-            return self.json({'ready': True, 'profiles': PROFILES, 'images': len(self.server.state.images), 'publicSamples': True, 'transport': self.server.state.transport})
-        match = ROUTE.fullmatch(path)
-        if match:
-            return self.throttled(*match.groups())
-        if path.startswith('/demo/'):
-            return self.json({'error': 'Invalid demo route or network profile.'}, 400)
-        if getattr(self.server, 'transport_only', False) or getattr(self.server, 'controls_only', False):
-            return self.json({'error': 'Demo endpoint only.'}, 404)
-        if any(part.startswith('.') for part in unquote(path).split('/') if part):
-            return self.json({'error': 'Not found'}, 404)
-        return super().do_GET()
+        if path == '/demo/config':
+            transport = self.server.state.transport
+            if not transport['emageOrigins']:
+                host = self.headers.get('Host', 'localhost')
+                scheme = self.headers.get('X-Forwarded-Proto', 'http').split(',')[0].strip()
+                parsed = urlsplit(f'{scheme}://{host}')
+                if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
+                    return self.json({'error': 'Invalid public host.'}, 400)
+                hostname = parsed.hostname
+                if ':' in hostname or re.fullmatch(r'[0-9.]+', hostname):
+                    transport = {'emageOrigins': [], 'pngOrigins': []}
+                else:
+                    # api.example.com -> e1.example.com; localhost -> e1.localhost.
+                    domain = hostname.split('.', 1)[1] if len(hostname.split('.')) > 2 else hostname
+                    suffix = f':{parsed.port}' if parsed.port else ''
+                    origins = [f'{parsed.scheme}://{label}.{domain}{suffix}' for label in ('e1', 'e2', 'p1', 'p2')]
+                    transport = {'emageOrigins': origins[:2], 'pngOrigins': origins[2:]}
+            return self.json({'ready': True, 'profiles': PROFILES, 'images': len(self.server.state.images),
+                              'publicSamples': True, 'transport': transport, 'shaping': 'headers'})
+        if path.startswith('/demo/png/'):
+            name = unquote(path[len('/demo/png/'):])
+            source = self.server.state.pngs.get(name)
+            if source is None:
+                return self.json({'error': 'Unknown public PNG.'}, 404)
+            return self.proxy(source)
+        return self.proxy()
 
-    def throttled(self, profile, run, lane, kind, resource):
+    def do_HEAD(self):
+        return self.proxy()
+
+    def do_PUT(self):
+        return self.proxy()
+
+    do_PATCH = do_DELETE = do_PUT
+
+    def proxy(self, png=None):
         try:
-            source = self.server.state.source(kind, resource)
-            bucket = self.server.state.bucket(profile, run, lane)
+            latency, rate, bucket, cancelled = self.shaping()
+            length = int(self.headers.get('Content-Length', '0'))
+            if length < 0:
+                raise ValueError('Invalid Content-Length.')
+            if self.headers.get('Transfer-Encoding'):
+                raise ValueError('Send a Content-Length for request bodies.')
         except ValueError as error:
+            self.close_connection = True
             return self.json({'error': str(error)}, 400)
         except RuntimeError as error:
             return self.json({'error': str(error)}, 503)
-        # An added delay per request, not a claim to emulate TCP, loss, or radio.
-        cancelled = self.server.state.run_event(run)
-        if cancelled.wait(PROFILES[profile]['latencyMs'] / 1000):
-            self.close_connection = True
-            return
-        response = None
-        try:
-            if kind == 'api':
-                headers = {'X-Emage-Layers': self.headers.get('X-Emage-Layers', 'all')}
-                try:
-                    response = urlopen(Request(source, headers=headers), timeout=30)
-                except HTTPError as error:
-                    response = error
-                status = response.code
-                headers = {name: response.headers[name] for name in RESPONSE_HEADERS if response.headers.get(name) is not None}
+        if latency:
+            if cancelled is not None:
+                if cancelled.wait(latency / 1000):
+                    self.close_connection = True
+                    return
             else:
-                response = source.open('rb')
-                status = 200
-                headers = {'Content-Type': 'image/png', 'Content-Length': str(source.stat().st_size)}
-        except (URLError, OSError, http.client.HTTPException):
-            if response:
-                response.close()
-            return self.json({'error': 'Cannot reach the Emage API. Start Emage-Server and run npm run blog again.'}, 502)
+                time.sleep(latency / 1000)
+        connection = response = None
         try:
+            if png is not None:
+                response = png.open('rb')
+                status = 200
+                headers = [('Content-Type', 'image/png'), ('Content-Length', str(png.stat().st_size))]
+            else:
+                upstream = urlsplit(self.server.state.api)
+                cls = http.client.HTTPSConnection if upstream.scheme == 'https' else http.client.HTTPConnection
+                connection = cls(upstream.hostname, upstream.port, timeout=30)
+                # A client Host or absolute request URL never selects the upstream.
+                path = upstream.path.rstrip('/') + '/' + self.path.lstrip('/')
+                blocked = HOP_HEADERS | {part.strip().lower() for part in self.headers.get('Connection', '').split(',')}
+                connection.putrequest(self.command, path, skip_accept_encoding=True)
+                for name, value in self.headers.items():
+                    if name.lower() not in blocked | {'host', *(h.lower() for h in CONTROL_HEADERS)}:
+                        connection.putheader(name, value)
+                connection.endheaders()
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        raise OSError('Incomplete request body.')
+                    connection.send(chunk)
+                    remaining -= len(chunk)
+                response = connection.getresponse()
+                status = response.status
+                blocked = HOP_HEADERS | {part.strip().lower() for part in response.getheader('Connection', '').split(',')}
+                replace_cors = self.headers.get('Origin') in self.server.state.allowed_origins
+                headers = [(name, value) for name, value in response.getheaders()
+                           if name.lower() not in blocked and not (replace_cors and name.lower().startswith('access-control-'))]
             self.send_response(status)
-            for name, value in headers.items():
+            for name, value in headers:
+                if (latency or rate) and name.lower() == 'cache-control':
+                    continue
                 self.send_header(name, value)
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('X-Demo-Bytes-Per-Second', str(PROFILES[profile]['bytesPerSecond']))
-            self.send_header('X-Demo-Latency-Ms', str(PROFILES[profile]['latencyMs']))
-            # Kestrel may omit Content-Length. Closing delimits that response.
-            if 'Content-Length' not in headers:
+            if latency or rate:
+                self.send_header('Cache-Control', 'no-store')
+            if rate:
+                self.send_header('X-Demo-Bytes-Per-Second', str(rate))
+            if latency:
+                self.send_header('X-Demo-Latency-Ms', str(latency))
+            if not any(name.lower() == 'content-length' for name, _ in headers):
                 self.send_header('Connection', 'close')
                 self.close_connection = True
             self.end_headers()
-            while data := response.read(4096):
-                bucket.charge(len(data))
-                self.wfile.write(data)
-                self.wfile.flush()
-        except (TransferCancelled, BrokenPipeError, ConnectionResetError, TimeoutError, http.client.HTTPException):
+            if self.command != 'HEAD':
+                read = getattr(response, 'read1', response.read)
+                while data := read(4096):
+                    if cancelled is not None and cancelled.is_set():
+                        raise TransferCancelled()
+                    if bucket:
+                        bucket.charge(len(data))
+                    self.wfile.write(data)
+                    self.wfile.flush()
+        except (TransferCancelled, BrokenPipeError, ConnectionResetError):
             self.close_connection = True
+        except (OSError, http.client.HTTPException):
+            self.close_connection = True
+            if response is None:
+                self.json({'error': 'Cannot reach the Emage API.'}, 502)
         finally:
-            response.close()
+            if response:
+                response.close()
+            if connection:
+                connection.close()
 
 
 def upload_password():
@@ -276,61 +339,20 @@ def normalize_origin(value):
     return f'{parsed.scheme}://{parsed.netloc}'
 
 
-def create_servers(state, port, bind='127.0.0.1', public_origin=None,
-                   transport_ports=None, transport_origins=None, controls_only=False):
-    """Four isolated socket pools, five gallery images each; shared row budgets.
-
-    Local runs allocate auxiliary ports automatically. Docker uses fixed ports
-    and advertises browser-accessible origins instead of container addresses.
-    """
-    if transport_ports is not None and (len(transport_ports) != 4 or
-            len(set(transport_ports)) != 4 or any(not 1 <= value <= 65535 for value in transport_ports)):
-        raise ValueError('Specify four distinct transport ports between 1 and 65535.')
+def create_servers(state, port, bind='127.0.0.1', public_origin=None, transport_origins=None):
+    """One HTTP listener for every subdomain; Cloudflare Tunnel terminates TLS."""
     if public_origin:
         public_origin = normalize_origin(public_origin)
-    if transport_origins is not None:
+    if transport_origins:
         transport_origins = [normalize_origin(value) for value in transport_origins]
         if len(transport_origins) != 4 or len(set(transport_origins)) != 4:
             raise ValueError('Specify four distinct public transport origins.')
-    servers = []
-    try:
-        page = ThreadingHTTPServer((bind, port), DemoHandler)
-        page.state, page.daemon_threads, page.transport_only = state, True, False
-        page.controls_only = controls_only
-        servers.append(page)
-        page_port = page.server_address[1]
-        state.allowed_origins = ({public_origin} if public_origin else
-                                 {f'http://localhost:{page_port}', f'http://127.0.0.1:{page_port}'})
-        if public_origin:
-            public = urlsplit(public_origin)
-            if public.hostname in ('localhost', '127.0.0.1'):
-                suffix = f':{public.port}' if public.port else ''
-                state.allowed_origins.update(f'{public.scheme}://{host}{suffix}' for host in ('localhost', '127.0.0.1'))
-        else:
-            public = urlsplit(f'http://127.0.0.1:{page_port}')
-        if controls_only:
-            # The allowed site origin may be GitHub Pages, which does not host
-            # these listeners. Remote deployments supply transport_origins.
-            public = urlsplit(f'http://localhost:{page_port}')
-        index = 0
-        for name in ('emageOrigins', 'pngOrigins'):
-            state.transport[name] = []
-            for _ in range(2):
-                server = ThreadingHTTPServer((bind, transport_ports[index] if transport_ports else 0), DemoHandler)
-                server.state, server.daemon_threads, server.transport_only = state, True, True
-                servers.append(server)
-                host = f'[{public.hostname}]' if ':' in public.hostname else public.hostname
-                origin = (transport_origins[index] if transport_origins else
-                          f'{public.scheme}://{host}:{server.server_address[1]}')
-                if origin in state.allowed_origins:
-                    raise ValueError('Transport origins must be separate from the page origin.')
-                state.transport[name].append(origin)
-                index += 1
-        return servers
-    except (OSError, ValueError):
-        for server in servers:
-            server.server_close()
-        raise
+    state.allowed_origins = {public_origin} if public_origin else {'https://autovizz.github.io'}
+    if transport_origins:
+        state.transport = {'emageOrigins': transport_origins[:2], 'pngOrigins': transport_origins[2:]}
+    server = ThreadingHTTPServer((bind, port), DemoHandler)
+    server.state, server.daemon_threads = state, True
+    return [server]
 
 
 def seed_with_retry(state, attempts=1, delay=2):
@@ -349,14 +371,12 @@ def seed_with_retry(state, attempts=1, delay=2):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', type=int, default=8082)
+    parser.add_argument('--port', type=int, default=443)
     parser.add_argument('--api', default=os.environ.get('DEMO_API_URL', 'http://localhost:3233'))
     parser.add_argument('--bind', default='127.0.0.1')
     parser.add_argument('--public-origin', default=os.environ.get('DEMO_PUBLIC_ORIGIN'))
-    parser.add_argument('--transport-ports', help='Four comma-separated listener ports (otherwise allocated automatically).')
     parser.add_argument('--transport-origins', default=os.environ.get('DEMO_TRANSPORT_ORIGINS'), help='Four comma-separated public origins, if different from the listener ports.')
     parser.add_argument('--seed-attempts', type=int, default=1)
-    parser.add_argument('--controls-only', action='store_true', help='Serve demo API endpoints only; host the client separately.')
     parser.add_argument('--skip-seed', action='store_true', help='Use fixtures already uploaded to the API.')
     args = parser.parse_args()
     try:
@@ -364,27 +384,19 @@ def main():
         state = DemoState(args.api, manifest)
         if not args.skip_seed:
             seed_with_retry(state, args.seed_attempts)
-        ports = [int(value) for value in args.transport_ports.split(',')] if args.transport_ports else None
         origins = args.transport_origins.split(',') if args.transport_origins else None
         servers = create_servers(state, args.port, bind=args.bind, public_origin=args.public_origin,
-                                 transport_ports=ports, transport_origins=origins, controls_only=args.controls_only)
+                                 transport_origins=origins)
     except (OSError, ValueError, RuntimeError) as error:
-        parser.exit(1, f'{error}\nIf the UI port is occupied, pass --port 8085.\n')
-    page_origin = args.public_origin or f'http://localhost:{servers[0].server_address[1]}'
-    print(f'Demo controls: http://{args.bind}:{servers[0].server_address[1]}/demo/config' if args.controls_only else f'Interactive article: {page_origin}/blog.html', flush=True)
-    print('Four independent gallery origins; each strategy still shares one bandwidth budget.', flush=True)
-    for server in servers[1:]:
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        parser.exit(1, f'{error}\n')
+    print(f'Emage proxy: http://{args.bind}:{servers[0].server_address[1]} -> {state.api}', flush=True)
+    print('All hosts share this listener. No shaping headers means no added latency or rate limit.', flush=True)
     try:
         servers[0].serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        for server in servers[1:]:
-            server.shutdown()
-        for server in servers:
-            server.server_close()
+        servers[0].server_close()
 
 
 if __name__ == '__main__':

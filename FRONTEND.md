@@ -180,18 +180,20 @@ The optional client-only Docker Compose setup builds WASM from `WASM_SOURCE`
 (default 3433). It does not run backend services. The backend console also defaults
 to local port 3433; use a different `CLIENT_PORT` when running both locally.
 
-The backend deployment independently runs the API (3233), demo controls (8082),
-four allowlisted image-transfer listeners (3434–3437), and the rebuild console
-(3433). Enter the API URL in the workspace. On the article, enter the demo-control
-URL and click Connect. Public HTTPS URLs are required for remote HTTPS clients;
-localhost addresses refer to the browser's machine.
+The backend independently runs the .NET API on 3233, Python proxy on 443,
+and rebuild console on 3433. Cloudflare Tunnel forwards public HTTPS requests
+to `http://localhost:443`; Python itself uses HTTP. The proxy accepts all
+subdomains and forwards API paths to the fixed .NET upstream. Old transfer
+ports 3434–3437 and demo port 8082 are no longer used.
 
-`DEMO_PUBLIC_ORIGIN` on the server must match the client origin. For the hosted
-client it is `https://autovizz.github.io`, without `/Emage/`. Cross-origin demo
-configuration, transfer preflights, cancellation and timing headers allow that
-origin. `DEMO_TRANSPORT_ORIGINS` can specify four separate HTTPS transfer origins
-(two Emage followed by two PNG). The article's controls use the configured demo
-origin, independently of GitHub Pages and the four gallery connection pools.
+`DEMO_PUBLIC_ORIGIN` is the allowed client origin, by default
+`https://autovizz.github.io` without `/Emage/`. The gallery advertises four
+subdomain URLs on the same proxy listener; `DEMO_TRANSPORT_ORIGINS` can override
+them. Its configuration, cancellation and transfers allow the Pages origin.
+Request headers `X-Demo-Latency-Ms` and `X-Demo-Bytes-Per-Second` select delay and
+rate; `X-Demo-Run` and `X-Demo-Lane` share a budget across gallery requests.
+No shaping headers means no added latency or bandwidth cap. PNG downloads use
+fetch plus object URLs so they can send the same headers as Emage.
 
 `/admin` belongs to the backend console, not the static site. The upload password
 authorizes backend builds and recovery of the API and demo proxy. It does not

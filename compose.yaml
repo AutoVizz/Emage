@@ -8,5 +8,5 @@ services:
         wasm-source: ${WASM_SOURCE:-../EmageWasm}
       args:
         EMAGE_API_URL: ${EMAGE_API_URL:-http://localhost:3233}
-        EMAGE_DEMO_URL: ${EMAGE_DEMO_URL:-http://localhost:8082}
+        EMAGE_DEMO_URL: ${EMAGE_DEMO_URL:-http://localhost:443}
     restart: unless-stopped
