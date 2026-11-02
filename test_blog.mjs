@@ -98,6 +98,7 @@ function slice(image, first, last) {
 }
 
 let dom, requests = [], active = 0, peak = 0, configured = true;
+const configRequests = [];
 let blockRequest = () => false;
 const held = new Set(), cancelledRuns = [];
 const transport = { emageOrigins: ['https://e1.example.com', 'https://e2.example.com'], pngOrigins: ['https://p1.example.com', 'https://p2.example.com'] };
@@ -140,6 +141,7 @@ const json = value => new Response(JSON.stringify(value));
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(input);
   if (url.pathname.endsWith('/demo-assets/manifest.json')) return json(manifest);
+  if (url.pathname === '/demo/config') configRequests.push(url.href);
   if (url.pathname === '/demo/config') return configured ? json({ ready: true, images: 10, shaping: 'headers', profiles: configured === 'old-profiles' ? {} : profiles, ...(configured === 'legacy' ? {} : { transport }) }) : new Response('No proxy', { status: 404 });
   if (url.pathname.startsWith('/demo/cancel/')) {
     assert.equal(options.method, 'POST');
@@ -458,10 +460,38 @@ console.log('ALL BLOG CHECKS PASSED');
 configured = true;
 await open({ pageUrl: 'https://autovizz.github.io/Emage/blog.html', proxyUrl: 'https://demo.example' });
 assert.match($('#bootStatus').textContent, /Experiments ready/);
-assert.equal($('#demoServerUrl').value, 'https://demo.example');
+assert.equal($('#demoServerUrl').value, 'demo.example');
 requests = [];
 await click('#layerRun');
 assert.equal($('#layerStatus').classList.contains('error'), false, $('#layerStatus').textContent);
 assert.ok(requests.length > 0);
 assert.ok(requests.every(request => request.origin === 'https://demo.example'), 'Pages loads image windows from the separately configured backend');
 console.log('PASS Pages: project-path article connects to a separate demo control origin');
+
+// The hostname form uses the shared controls and reconnects without reloading.
+await open({ pageUrl: 'https://autovizz.github.io/Emage/blog.html' });
+$('#demoServerUrl').value = 'proxy.example.com';
+await $('#demoConnection').onsubmit(new dom.window.Event('submit', { cancelable: true }));
+assert.equal(window.sessionStorage.getItem('emage.demoUrl'), 'https://proxy.example.com:3434');
+assert.equal(configRequests.at(-1), 'https://proxy.example.com:3434/demo/config');
+assert.equal($('#galleryRun').disabled, false);
+$('#demoServerUrl').value = '203.0.113.10';
+await $('#demoConnection').onsubmit(new dom.window.Event('submit', { cancelable: true }));
+assert.equal(window.sessionStorage.getItem('emage.demoUrl'), 'http://203.0.113.10:3434');
+assert.equal(configRequests.at(-1), 'http://203.0.113.10:3434/demo/config');
+const attempts = configRequests.length;
+for (const value of ['', 'https://user:secret@host', 'https://host/path', 'host?secret=1', 'ftp://host']) {
+  $('#demoServerUrl').value = value;
+  await $('#demoConnection').onsubmit(new dom.window.Event('submit', { cancelable: true }));
+  assert.equal($('#demoServerUrl').getAttribute('aria-invalid'), 'true');
+  assert.equal($('#demoServerError').hidden, false);
+}
+assert.equal(configRequests.length, attempts, 'invalid hostnames do not make network requests');
+$('#demoServerUrl').value = 'http://localhost:13434';
+$('#demoServerUrl').dispatchEvent(new dom.window.Event('input'));
+assert.equal($('#demoServerError').hidden, true);
+await $('#demoConnection').onsubmit(new dom.window.Event('submit', { cancelable: true }));
+assert.equal(window.sessionStorage.getItem('emage.demoUrl'), 'http://localhost:13434');
+assert.equal($('#demoServerUrl').hasAttribute('aria-invalid'), false);
+dom.window.close();
+console.log('PASS proxy hostname: hostname/IP defaults, explicit URL, inline validation and reconnect');

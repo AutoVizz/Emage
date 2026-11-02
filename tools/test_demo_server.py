@@ -91,15 +91,16 @@ class ProxyTests(unittest.TestCase):
         cls.upstream.requests = []
         cls.manifest = json.loads((ROOT / 'demo-assets/manifest.json').read_text())
         cls.state = DemoState('http://127.0.0.1:' + str(cls.upstream.server_port), cls.manifest)
-        cls.proxy = create_servers(cls.state, 0, public_origin='https://autovizz.github.io')[0]
-        for server in (cls.upstream, cls.proxy):
+        cls.proxies = create_servers(cls.state, [0] * 4, public_origin='https://autovizz.github.io')
+        cls.proxy = cls.proxies[0]
+        for server in (cls.upstream, *cls.proxies):
             threading.Thread(target=server.serve_forever, daemon=True).start()
         cls.opener = build_opener(ProxyHandler({}))
         cls.base = 'http://127.0.0.1:' + str(cls.proxy.server_port)
 
     @classmethod
     def tearDownClass(cls):
-        for server in (cls.proxy, cls.upstream):
+        for server in (*cls.proxies, cls.upstream):
             server.shutdown()
             server.server_close()
 
@@ -172,12 +173,16 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(headers['Timing-Allow-Origin'], 'https://autovizz.github.io')
         self.assertIn('X-Emage-TilePsotOffsets', headers['Access-Control-Expose-Headers'])
 
-    def test_cloudflare_public_host_advertises_subdomains_on_same_port(self):
-        status, body, _ = self.request('/demo/config', {'Host': 'api.example.com', 'X-Forwarded-Proto': 'https'})
+    def test_request_host_advertises_four_transfer_ports(self):
+        status, body, _ = self.request('/demo/config', {'Host': '203.0.113.10:3434'})
         config = json.loads(body)
         self.assertEqual(status, 200)
         self.assertEqual(config['shaping'], 'headers')
-        self.assertEqual(config['transport'], {'emageOrigins': ['https://e1.example.com', 'https://e2.example.com'], 'pngOrigins': ['https://p1.example.com', 'https://p2.example.com']})
+        origins = [f'http://203.0.113.10:{server.server_port}' for server in self.proxies]
+        self.assertEqual(config['transport'], {'emageOrigins': origins[:2], 'pngOrigins': origins[2:]})
+        for server in self.proxies:
+            with self.opener.open(f'http://127.0.0.1:{server.server_port}/images', timeout=3) as response:
+                self.assertEqual(response.read(), b'upstream response')
 
     def test_png_uses_headers_and_fixed_public_fixture_allowlist(self):
         image = self.manifest['images'][0]
@@ -197,7 +202,7 @@ class ProxyTests(unittest.TestCase):
     def test_invalid_public_settings_fail_before_binding(self):
         for options in ({'public_origin': 'https://user:secret@host'}, {'public_origin': 'https://host/path'}, {'transport_origins': ['https://one.example'] * 4}):
             with patch('tools.demo_server.ThreadingHTTPServer') as server:
-                with self.assertRaises(ValueError): create_servers(self.state, 443, **options)
+                with self.assertRaises(ValueError): create_servers(self.state, [0] * 4, **options)
                 server.assert_not_called()
 
     def test_seed_retries_startup(self):

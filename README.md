@@ -89,8 +89,10 @@ a running API is still needed to verify rendering, CORS, and the live deployment
 `blog.html` is the project write-up with four working experiments, a protocol
 overview, and possible applications. The workspace sidebar links to it as
 **How Emage works**. Network experiments use a separate Python proxy that streams real responses
-from the Emage API. On the hosted article, enter its URL in **Demo proxy URL**
-and click **Connect**; it is saved for this browser tab.
+from the Emage API. On the hosted article, enter its URL in **Proxy hostname**
+and click **Connect**; it is saved for this browser tab. A bare hostname uses
+HTTPS and port 3434; a bare IP address uses HTTP and port 3434. Full HTTP URLs work for local testing. Connection errors appear beside
+the field, and reconnecting does not reload the article.
 
 The comparison's current-level readouts follow each decoded frame and remain
 visible beside the completed timing measurements. The level viewer also reports
@@ -116,13 +118,14 @@ keep surfaces, controls, and feedback consistent. The selector stays usable duri
 
 Start the separate backend deployment and open the Pages article. Connect it
 to the public HTTPS proxy hostname. For local proxy development, generate the
-fixtures and run `python3 tools/demo_server.py --port 8443`; serve the static
-client separately. The Docker deployment uses Python port 443 and .NET port 3233.
+fixtures and run `python3 tools/demo_server.py`; serve the static
+client separately. The Docker deployment uses Python ports 3434–3437 and .NET port 3233.
 
-Cloudflare Tunnel terminates public HTTPS and forwards the API hostname and all
-gallery subdomains to **http://localhost:443**. The proxy accepts every Host
-and uses one fixed .NET upstream. It forwards reads, uploads and deletes,
-including the upload password header and packet framing headers.
+Python listens only on **3434–3437**. Ports 3434–3435 carry the Emage row,
+and 3436–3437 carry the PNG row. Port 3434 also serves `/demo/config` and run
+cancellation, so no fifth proxy/control port is needed. All four listeners
+forward API reads, uploads and deletes to the same fixed .NET upstream on 3233.
+The client remains a separate static deployment.
 
 Shaping is opt-in through request headers:
 
@@ -144,8 +147,8 @@ its private environment. It never puts the password in browser assets.
 The page has a conventional article layout, with experiments embedded between
 the explanatory sections. Experiments run one at a time so timings do not
 silently compete with another experiment. A **Stop experiment** control stays
-available during a run. It aborts metadata/packet fetches, removes unfinished
-PNG fetches and image display, interrupts paint waits, and tells the proxy to cancel that
+available during a run. It aborts metadata/packet and PNG fetches, clears unfinished
+image display, interrupts paint waits, and tells the proxy to cancel that
 run's reserved bandwidth. Then all settings and other experiments unlock.
 WASM decoding is synchronous; Stop takes effect when the current decode yields
 back to the browser. Cancelled runs keep completed frames and report **stopped**,
@@ -172,14 +175,17 @@ Profiles add body pacing plus a per-request delay: 96 KiB/s + 180 ms,
 Browser scheduling, CPU, TCP behavior, packet loss, and real mobile-network
 conditions are not emulated. Codec startup is outside measured intervals.
 
-The gallery uses four subdomain origins (two per row), all through the same
-Python port 443. By default an API host `api.example.com` advertises
-`e1.example.com`, `e2.example.com`, `p1.example.com` and `p2.example.com`.
-Route those names, or a wildcard, through Cloudflare Tunnel to the same origin.
-`DEMO_TRANSPORT_ORIGINS` can override all four public origins. Every request
-shares process-wide budgets keyed by its rate, run and strategy, so subdomains
-do not multiply a row's bandwidth. CDN and browser connection scheduling still
-apply; subdomains do not guarantee separate HTTP/2 connections.
+The proxy advertises four origins using the hostname/IP of the configuration
+request and its four listening ports. Enter a host or IP in **Proxy hostname / IP**
+and click Connect. `DEMO_TRANSPORT_ORIGINS` can override the four public URLs
+when external TLS/port mappings differ. Every listener shares process-wide
+budgets keyed by rate, run and strategy, so using more ports does not multiply
+a row's bandwidth.
+
+GitHub Pages uses HTTPS. Remote IP endpoints therefore need HTTPS too; browsers
+block plain HTTP requests from the hosted article as mixed content. For raw HTTP
+IP endpoints, use the separately served HTTP client instead. Loopback/local
+browser restrictions can differ. CORS does not override mixed-content rules.
 
 PNG requests use fetch so they can send shaping headers, then display the full
 body through an object URL. PNG timing therefore measures full-body download

@@ -47,6 +47,9 @@ p code { font-size: .8em; padding: 1px 4px; background: var(--soft); }
 .controls label { display: flex; flex-direction: column; gap: 6px; font: 13px/1.5 var(--sans); color: var(--muted); flex: 1 1 140px; min-width: 0; }
 .controls input, .controls select, .reader-label input { width: 100%; background: var(--page); color: var(--ink); border: 1px solid var(--control-border); border-radius: 3px; min-height: 37px; padding: 8px; }
 .controls input { max-width: 140px; }
+.proxy-connection label { flex-basis: 320px; }
+.proxy-connection input { max-width: none; }
+.proxy-connection + .method-note { margin-top: -10px; }
 .field-error { color: var(--error); font: 12px/1.5 var(--sans); }
 button { border: 1px solid var(--control-border); color: var(--ink); background: var(--soft); border-radius: 3px; min-height: 37px; padding: 8px 13px; }
 button:hover:enabled { background: var(--hover); border-color: var(--hover-border); }

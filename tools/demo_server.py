@@ -173,15 +173,9 @@ class DemoHandler(BaseHTTPRequestHandler):
                 parsed = urlsplit(f'{scheme}://{host}')
                 if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
                     return self.json({'error': 'Invalid public host.'}, 400)
-                hostname = parsed.hostname
-                if ':' in hostname or re.fullmatch(r'[0-9.]+', hostname):
-                    transport = {'emageOrigins': [], 'pngOrigins': []}
-                else:
-                    # api.example.com -> e1.example.com; localhost -> e1.localhost.
-                    domain = hostname.split('.', 1)[1] if len(hostname.split('.')) > 2 else hostname
-                    suffix = f':{parsed.port}' if parsed.port else ''
-                    origins = [f'{parsed.scheme}://{label}.{domain}{suffix}' for label in ('e1', 'e2', 'p1', 'p2')]
-                    transport = {'emageOrigins': origins[:2], 'pngOrigins': origins[2:]}
+                host = f'[{parsed.hostname}]' if ':' in parsed.hostname else parsed.hostname
+                origins = [f'{parsed.scheme}://{host}:{port}' for port in self.server.state.transport_ports]
+                transport = {'emageOrigins': origins[:2], 'pngOrigins': origins[2:]}
             return self.json({'ready': True, 'profiles': PROFILES, 'images': len(self.server.state.images),
                               'publicSamples': True, 'transport': transport, 'shaping': 'headers'})
         if path.startswith('/demo/png/'):
@@ -339,8 +333,10 @@ def normalize_origin(value):
     return f'{parsed.scheme}://{parsed.netloc}'
 
 
-def create_servers(state, port, bind='127.0.0.1', public_origin=None, transport_origins=None):
-    """One HTTP listener for every subdomain; Cloudflare Tunnel terminates TLS."""
+def create_servers(state, ports=(3434, 3435, 3436, 3437), bind='127.0.0.1', public_origin=None, transport_origins=None):
+    """Four transfer listeners share one state; the first also serves controls."""
+    if len(ports) != 4 or any(not 0 <= port <= 65535 for port in ports) or len({port for port in ports if port}) != sum(bool(port) for port in ports):
+        raise ValueError('Specify four distinct transfer ports between 1 and 65535.')
     if public_origin:
         public_origin = normalize_origin(public_origin)
     if transport_origins:
@@ -350,9 +346,18 @@ def create_servers(state, port, bind='127.0.0.1', public_origin=None, transport_
     state.allowed_origins = {public_origin} if public_origin else {'https://autovizz.github.io'}
     if transport_origins:
         state.transport = {'emageOrigins': transport_origins[:2], 'pngOrigins': transport_origins[2:]}
-    server = ThreadingHTTPServer((bind, port), DemoHandler)
-    server.state, server.daemon_threads = state, True
-    return [server]
+    servers = []
+    try:
+        for port in ports:
+            server = ThreadingHTTPServer((bind, port), DemoHandler)
+            server.state, server.daemon_threads = state, True
+            servers.append(server)
+        state.transport_ports = [server.server_address[1] for server in servers]
+        return servers
+    except OSError:
+        for server in servers:
+            server.server_close()
+        raise
 
 
 def seed_with_retry(state, attempts=1, delay=2):
@@ -371,11 +376,11 @@ def seed_with_retry(state, attempts=1, delay=2):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', type=int, default=443)
+    parser.add_argument('--ports', default='3434,3435,3436,3437', help='Four comma-separated transfer ports; the first also serves demo controls.')
     parser.add_argument('--api', default=os.environ.get('DEMO_API_URL', 'http://localhost:3233'))
     parser.add_argument('--bind', default='127.0.0.1')
     parser.add_argument('--public-origin', default=os.environ.get('DEMO_PUBLIC_ORIGIN'))
-    parser.add_argument('--transport-origins', default=os.environ.get('DEMO_TRANSPORT_ORIGINS'), help='Four comma-separated public origins, if different from the listener ports.')
+    parser.add_argument('--transport-origins', default=os.environ.get('DEMO_TRANSPORT_ORIGINS'), help='Four comma-separated public origins, if different from the request host and transfer ports.')
     parser.add_argument('--seed-attempts', type=int, default=1)
     parser.add_argument('--skip-seed', action='store_true', help='Use fixtures already uploaded to the API.')
     args = parser.parse_args()
@@ -385,18 +390,25 @@ def main():
         if not args.skip_seed:
             seed_with_retry(state, args.seed_attempts)
         origins = args.transport_origins.split(',') if args.transport_origins else None
-        servers = create_servers(state, args.port, bind=args.bind, public_origin=args.public_origin,
+        ports = [int(value) for value in args.ports.split(',')]
+        servers = create_servers(state, ports, bind=args.bind, public_origin=args.public_origin,
                                  transport_origins=origins)
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f'{error}\n')
     print(f'Emage proxy: http://{args.bind}:{servers[0].server_address[1]} -> {state.api}', flush=True)
-    print('All hosts share this listener. No shaping headers means no added latency or rate limit.', flush=True)
+    print('Four transfer ports:', ', '.join(str(port) for port in state.transport_ports), flush=True)
+    print('No shaping headers means no added latency or rate limit.', flush=True)
+    for server in servers[1:]:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         servers[0].serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        servers[0].server_close()
+        for server in servers[1:]:
+            server.shutdown()
+        for server in servers:
+            server.server_close()
 
 
 if __name__ == '__main__':

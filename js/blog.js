@@ -14,7 +14,7 @@ const strategies = [
   ['One-shot at target', 'The same target window, fetched and decoded once.'],
   ['One-shot full', 'Every resolution, even when the display is smaller.'],
 ];
-let engine, manifest, ready = false, busy = false, layerCache = null, activeRun = null;
+let engine, manifest, ready = false, busy = false, connecting = false, layerCache = null, activeRun = null;
 let transport = null;
 let comparisonRuns = [];
 const ms = value => value == null ? '—' : `${value.toFixed(0)} ms`;
@@ -27,14 +27,37 @@ const sample = selector => manifest.images.find(image => image.id === $(selector
 let demoBase = siteConfig.demoUrl || window.location.origin;
 try { demoBase = window.sessionStorage.getItem('emage.demoUrl') || demoBase; } catch { /* Optional browser storage. */ }
 const url = (path, origin = demoBase) => new URL(path.replace(/^\/+/, ''), origin.replace(/\/+$/, '') + '/').href;
-$('#demoServerUrl').value = demoBase;
-$('#connectDemoServer').onclick = () => {
+const hostnameInput = $('#demoServerUrl');
+if (demoBase !== window.location.origin) {
+  const address = new URL(demoBase);
+  hostnameInput.value = address.protocol === 'https:' ? address.host : address.origin;
+}
+function clearHostnameError() {
+  hostnameInput.removeAttribute('aria-invalid');
+  $('#demoServerError').hidden = true;
+}
+hostnameInput.addEventListener('input', clearHostnameError);
+$('#demoConnection').onsubmit = async event => {
+  event.preventDefault();
+  if (busy || connecting) return;
+  clearHostnameError();
   try {
-    const address = new URL($('#demoServerUrl').value.trim());
-    if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password || address.search || address.hash) throw new Error('Enter an HTTP or HTTPS demo proxy URL without credentials, query or fragment.');
-    window.sessionStorage.setItem('emage.demoUrl', address.href.replace(/\/+$/, ''));
-    window.location.reload();
-  } catch (error) { status('bootStatus', error.message, true); }
+    const value = hostnameInput.value.trim();
+    if (!value || /[\s/?#@]/.test(value.replace(/^https?:\/\//i, '').replace(/\/$/, ''))) throw new Error('Enter a hostname or HTTP(S) origin, without a path or credentials.');
+    const local = /^(localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[a-f\d:]+\])(?::\d+)?\/?$/i.test(value);
+    const fullUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
+    const address = new URL(fullUrl ? value : `${local ? 'http' : 'https'}://${value}`);
+    if (!fullUrl && !/:\d+\/?$/.test(value)) address.port = '3434';
+    if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password || address.search || address.hash || address.pathname !== '/') throw new Error('Enter a hostname or HTTP(S) origin, without a path or credentials.');
+    demoBase = address.origin;
+  } catch (error) {
+    hostnameInput.setAttribute('aria-invalid', 'true');
+    $('#demoServerError').textContent = error.message;
+    $('#demoServerError').hidden = false;
+    return;
+  }
+  try { window.sessionStorage.setItem('emage.demoUrl', demoBase); } catch { /* Connect even if browser storage is unavailable. */ }
+  await connectProxy();
 };
 const shapingHeaders = (profile, run, lane) => connectionProfiles[profile] ? ({
   'X-Demo-Latency-Ms': String(connectionProfiles[profile].latencyMs),
@@ -62,7 +85,7 @@ function client(image, suppliedKey, profile, run, lane, origin) {
 }
 function sync() {
   document.querySelectorAll('button, input, select').forEach(element => {
-    if (element.matches('[data-demo-connection]')) element.disabled = busy;
+    if (element.matches('[data-demo-connection]')) element.disabled = busy || connecting;
     else if (!element.matches('[data-theme-select]')) element.disabled = !ready || busy;
   });
   document.querySelectorAll('[data-layer-view]').forEach(button => {
@@ -97,7 +120,7 @@ $('#stopExperiment').onclick = () => {
   activeRun.controller.abort(new DOMException('Experiment stopped', 'AbortError'));
   status(activeRun.statusId, 'Stopping downloads…');
   for (const id of activeRun.ids) {
-    // This uses the control origin, outside the four busy gallery pools.
+    // Cancel through the configured proxy origin.
     fetch(url('/demo/cancel/' + id), { method: 'POST', keepalive: true }).catch(() => {});
   }
   sync();
@@ -208,7 +231,7 @@ $('#galleryRun').onclick = () => run('galleryStatus', 'Loading the two galleries
   }
   summary('emage'); summary('png');
   const progressive = manifest.images.map(async (image, index) => {
-    const instance = client(image, image.masterKey, profile, run, 'gallery-emage', transport.emageOrigins[index % 2]);
+    const instance = client(image, image.masterKey, profile, run, 'gallery-emage', transport.emageOrigins[index % transport.emageOrigins.length]);
     const canvas = $('#galleryCanvas' + index);
     try {
       const result = await instance.display(size, { canvas, signal, onLayer: frame => {
@@ -231,7 +254,7 @@ $('#galleryRun').onclick = () => run('galleryStatus', 'Loading the two galleries
   });
   // Fetch full PNG bodies so both rows can send the same shaping headers.
   const originals = manifest.images.map(async (image, index) => {
-    const source = url('/demo/png/' + image.id + '.png', transport.pngOrigins[index % 2]);
+    const source = url('/demo/png/' + image.id + '.png', transport.pngOrigins[index % transport.pngOrigins.length]);
     let blobUrl;
     try {
       const response = await fetch(source, { headers: shapingHeaders(profile, run, 'gallery-png'), signal });
@@ -389,29 +412,38 @@ $('#readerRun').onclick = () => run('readerStatus', 'Testing the supplied key…
 
 comparisonPanels();
 sync();
-try {
-  const [loadedEngine, loadedManifest, config] = await Promise.all([
-    Emage.init(),
-    fetch(new URL('../demo-assets/manifest.json', import.meta.url), { cache: 'no-store' }).then(response => { if (!response.ok) throw new Error('Sample manifest missing. Run node tools/build-demo-assets.mjs.'); return response.json(); }),
-    fetch(url('/demo/config'), { cache: 'no-store' }).then(response => response.ok ? response.json() : null).catch(() => null),
-  ]);
-  engine = loadedEngine;
-  manifest = loadedManifest;
-  transport = config?.transport;
-  connectionProfiles = config?.profiles || {};
-  if (manifest.images.length !== 10 || new Set(manifest.images.map(image => image.pixelSha256)).size !== 10) throw new Error('The gallery requires ten distinct sample images. Rebuild demo assets.');
-  document.querySelectorAll('[data-image-select]').forEach(select => { select.innerHTML = manifest.images.map(image => `<option value="${image.id}">${escapeHtml(image.title)}</option>`).join(''); });
-  document.querySelectorAll('[data-speed-select]').forEach(select => {
-    select.innerHTML = Object.entries(profiles).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
-    select.value = 'demo';
-  });
-  galleryCards();
-  clearLayers();
-  ownerKeys();
-  const origins = [...(transport?.emageOrigins || []), ...(transport?.pngOrigins || [])];
-  ready = Boolean(config?.ready && config?.images === 10 && config?.shaping === 'headers' && config?.profiles?.demo?.bytesPerSecond === 2 * 1024 * 1024 && transport?.emageOrigins?.length === 2 && transport?.pngOrigins?.length === 2 && new Set(origins).size === 4 && origins.every(origin => new URL(origin).origin !== window.location.origin));
-  status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Connect to the separate demo proxy above to run the experiments. For Docker, use its public URL (locally http://localhost:443) and check its API URL, upload password and allowed site origin; restart the proxy after changing its settings. The proxy needs the 2 MiB/s profile and independent gallery connections. Cloudflare Tunnel should route the API hostname and gallery subdomains to http://localhost:443. For a local proxy, use npm run blog.', !ready);
-} catch (error) {
-  status('bootStatus', 'Demo setup failed: ' + Emage.messageOf(error), true);
+async function connectProxy() {
+  connecting = true;
+  ready = false;
+  sync();
+  status('bootStatus', 'Connecting to the proxy…');
+  try {
+    const [loadedEngine, loadedManifest, config] = await Promise.all([
+      engine || Emage.init(),
+      manifest || fetch(new URL('../demo-assets/manifest.json', import.meta.url), { cache: 'no-store' }).then(response => { if (!response.ok) throw new Error('Sample manifest missing. Run node tools/build-demo-assets.mjs.'); return response.json(); }),
+      fetch(url('/demo/config'), { cache: 'no-store' }).then(response => response.ok ? response.json() : null).catch(() => null),
+    ]);
+    engine = loadedEngine;
+    manifest = loadedManifest;
+    transport = config?.transport;
+    connectionProfiles = config?.profiles || {};
+    if (manifest.images.length !== 10 || new Set(manifest.images.map(image => image.pixelSha256)).size !== 10) throw new Error('The gallery requires ten distinct sample images. Rebuild demo assets.');
+    document.querySelectorAll('[data-image-select]').forEach(select => { select.innerHTML = manifest.images.map(image => `<option value="${image.id}">${escapeHtml(image.title)}</option>`).join(''); });
+    document.querySelectorAll('[data-speed-select]').forEach(select => {
+      select.innerHTML = Object.entries(profiles).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+      select.value = 'demo';
+    });
+    galleryCards();
+    clearLayers();
+    ownerKeys();
+    const origins = [...(transport?.emageOrigins || []), ...(transport?.pngOrigins || [])];
+    ready = Boolean(config?.ready && config?.images === 10 && config?.shaping === 'headers' && config?.profiles?.demo?.bytesPerSecond === 2 * 1024 * 1024 && transport?.emageOrigins?.length === 2 && transport?.pngOrigins?.length === 2 && new Set(origins).size === 4 && origins.every(origin => ['http:', 'https:'].includes(new URL(origin).protocol)));
+    status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Enter the proxy hostname above and connect. Python listens on the four transfer ports, 3434–3437; controls use 3434. Check the proxy API URL, upload password and allowed site origin; restart it after changing settings. The proxy needs the 2 MiB/s profile and header controls. For a local proxy, use npm run blog.', !ready);
+  } catch (error) {
+    status('bootStatus', 'Demo setup failed: ' + Emage.messageOf(error), true);
+  } finally {
+    connecting = false;
+    sync();
+  }
 }
-sync();
+await connectProxy();
