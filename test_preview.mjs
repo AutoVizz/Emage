@@ -1,5 +1,4 @@
 import { wasmDir } from './wasm_test_path.mjs';
-// Preview / thumbnail path across access levels, against the live server.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 
@@ -27,8 +26,6 @@ const KEY = new Uint8Array(32).fill(0x11);
 const IV = new Uint8Array(16).fill(0x22);
 const PATH = 'preview-probe.j2k';
 
-// A smooth gradient plus a gradient ramp, so a coarse level is genuinely
-// representative rather than noise.
 const px = new Uint8Array(W * H * 3);
 for (let y = 0; y < H; ++y) {
     for (let x = 0; x < W; ++x) {
@@ -57,7 +54,6 @@ check(up.layers === RES, `server parsed layers=${up.layers}`);
 
 const keys = emage.granularKeys(RES);
 
-// ---- preview at every access level -------------------------------------
 for (let a = 0; a < RES; ++a) {
     emage.setCrypto({ key: keys[a], iv: IV, accessLevel: a });
     let out;
@@ -68,14 +64,12 @@ for (let a = 0; a < RES; ++a) {
         continue;
     }
     const d = out.decoded;
-    // The grant's ceiling: reduction >= RES-1-a
     const floor = RES - 1 - a;
     check(out.reduction >= floor,
         `access ${a}: preview ${d.width}x${d.height} at reduction ${out.reduction} ` +
         `(>= ${floor}, the grant's floor), 1 decode`);
 }
 
-// ---- preview with no IV configured, as the downloader does now ---------
 for (let a = 0; a < RES; ++a) {
     emage.setCrypto({ key: keys[a], accessLevel: -1 });
     const realFetch = globalThis.fetch;
@@ -116,7 +110,6 @@ try {
     check(false, 'preview with no IV failed: ' + (err && err.message));
 }
 
-// ---- display()/playAll(), the other two viewer entry points -------------
 reader.setCrypto({ key: keys[2], accessLevel: 2 });
 try {
     const out = await reader.display('64', { thumbSize: 64 });
@@ -135,10 +128,7 @@ try {
     check(false, 'playAll failed: ' + (err && err.message));
 }
 
-// ---- plaintext control through the same preview path -------------------
 const plainPath = 'preview-probe-plain.j2k';
-// Upload through the reader, whose imagePath is the plaintext one -- uploading
-// via `emage` would overwrite the encrypted probe instead.
 emage.setServer({ imagePath: plainPath });
 reader.setCrypto({ key: KEY, accessLevel: -1 });
 const plain = await emage.encodePixelData(px, W, H, {
@@ -151,8 +141,6 @@ const plains = await reader.preview({ thumbSize: 64 });
 check(plains.decoded.width > 0,
     `plaintext preview through the same path: ${plains.decoded.width}x${plains.decoded.height}`);
 check(pup.granularKeys == null, 'plaintext upload still reports no key material');
-// Cleanup is best-effort: either probe may already be gone from an aborted
-// earlier run, and a 404 on the way out is not a test failure.
 for (const [inst, p] of [[reader, plainPath], [emage, PATH]]) {
     inst.setServer({ imagePath: p });
     try { await inst.remove(); log('removed ' + p); } catch (e) { log('already gone: ' + p); }

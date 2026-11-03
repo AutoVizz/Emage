@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Password-protected deployment control, isolated from the application services."""
 import hmac
 import json
 import logging
@@ -103,7 +102,6 @@ class Deployment:
                 failures.append(name)
             elif require_ready and health == 'starting':
                 failures.append(name)
-        # Probe the actual API too, without adding a public health endpoint.
         if 'server' not in failures:
             try:
                 with urlopen('http://server:3233/images', timeout=3) as response:
@@ -233,7 +231,6 @@ class Deployment:
 
 class AdminHandler(BaseHTTPRequestHandler):
     def log_message(self, message, *args):
-        # Do not log request bodies, passwords, headers or status tokens.
         LOG.info('%s %s', self.command, self.path.split('?')[0])
 
     def respond(self, status, body):

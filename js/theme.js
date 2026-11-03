@@ -1,4 +1,3 @@
-// Loaded in the head so a saved preference applies before the page is painted.
 (() => {
   const storageKey = 'emage:theme';
   const system = window.matchMedia?.('(prefers-color-scheme: dark)');

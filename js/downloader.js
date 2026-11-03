@@ -107,7 +107,6 @@ function load(target) {
     loadedLevel = metadata.layers - 1 - decoded.reduction;
     loadingLevel = loadedLevel;
     cached = { client, stream: result.stream, transferredBytes: result.transferredBytes, httpRequests: result.httpRequests, displayDimension: result.targetDimension };
-    // Keep the authenticated raster and size its on-screen display independently.
     client.paintTo(canvas, decoded);
     const shown = showSize(decoded.width, decoded.height, result.targetDimension);
     $('#decodedEmpty').hidden = true;

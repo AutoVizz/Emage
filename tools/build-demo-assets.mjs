@@ -1,8 +1,6 @@
 import { wasmDir } from '../wasm_test_path.mjs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-// Original, procedural artwork: ten different RGB images, with lossless PNG
-// originals and encrypted lossless J2K counterparts. No downloads/dependencies.
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -104,7 +102,7 @@ function png(rgb) {
   const rows = Buffer.alloc(height * (width * 3 + 1));
   for (let y = 0; y < height; y++) {
     const start = y * (width * 3 + 1);
-    rows[start] = 1; // PNG Sub filter; reverse exactly, no loss of source pixels.
+    rows[start] = 1;
     for (let i = 0; i < width * 3; i++) rows[start + 1 + i] = (rgb[y * width * 3 + i] - (i >= 3 ? rgb[y * width * 3 + i - 3] : 0)) & 255;
   }
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);

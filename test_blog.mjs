@@ -1,9 +1,6 @@
 import { wasmDir } from './wasm_test_path.mjs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-// Real WASM codecs, generated fixtures, and page handlers. In-process DOM and
-// protocol adapters keep this runnable without sockets. Proxy pacing is tested
-// separately in Python; these timings are test timings, never article results.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
@@ -214,8 +211,6 @@ async function open({ pageUrl = 'http://localhost:8082/blog.html', proxyUrl = ''
   dom.window.HTMLCanvasElement.prototype.getContext = function () {
     return { putImageData: value => { this.painted = value; }, drawImage: source => { this.painted = source.painted; } };
   };
-  // The browser's ordinary image decoder is an adapter here; its actual file
-  // bytes and pixels were validated independently above, not timed in tests.
   Object.defineProperty(dom.window.HTMLImageElement.prototype, 'src', {
     configurable: true,
     set(value) {
@@ -303,7 +298,6 @@ for (let index = 0; index < 10; index++) {
 change('#gallerySize', '256');
 console.log('PASS gallery width: inline validation recovers, 1024 loads all ten full-resolution images progressively and all ten PNGs');
 
-// Stop must cancel real pending work, release all slots, and allow another test.
 requests = [];
 blockRequest = request => request.kind === 'png' || request.range === '1:1';
 $('#galleryRun').click();
@@ -369,7 +363,6 @@ for (const button of ['#layerRun', '#ownerRun', '#readerRun']) {
   assert.ok(requests.every(request => request.signal.aborted));
   releaseHeld();
 }
-// Even a paused rendering loop must not prevent Stop from settling a run.
 const paintController = new AbortController();
 const raf = globalThis.requestAnimationFrame;
 globalThis.requestAnimationFrame = () => 99999;
@@ -407,8 +400,6 @@ await click('#readerRun');
 assert.equal(requests.length, 0, 'empty key never falls back to the master');
 console.log('PASS blog access: owner derives seven keys, every reader grant is enforced, unrelated key stops before packets, blank key never substitutes master');
 
-// Cancellation must still work after fetch has resolved its response headers
-// and the browser is waiting for the rest of the body.
 const ordinaryFetch = globalThis.fetch;
 try {
   const image = manifest.images[0];
@@ -468,7 +459,6 @@ assert.ok(requests.length > 0);
 assert.ok(requests.every(request => request.origin === 'https://demo.example'), 'Pages loads image windows from the separately configured backend');
 console.log('PASS Pages: project-path article connects to a separate demo control origin');
 
-// The hostname form uses the shared controls and reconnects without reloading.
 await open({ pageUrl: 'https://autovizz.github.io/Emage/blog.html' });
 $('#demoServerUrl').value = 'proxy.example.com';
 await $('#demoConnection').onsubmit(new dom.window.Event('submit', { cancelable: true }));

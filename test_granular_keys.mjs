@@ -1,7 +1,4 @@
 import { wasmDir } from './wasm_test_path.mjs';
-// Granular progressive keys, exercised through the public Emage API:
-// key chain derivation, access-level clamping, the layer window the client
-// requests, and the keys the upload result exposes.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +52,6 @@ emage.decoder = decoder;
 emage.server = { baseUrl: 'https://example.invalid', imagePath: 'a.b', password: 'pw' };
 emage.setCrypto({ key: KEY, iv: IV });
 
-// --- 1. key chain derivation ---
 const keys = emage.granularKeys(RES);
 check(Array.isArray(keys) && keys.length === RES, `granularKeys returns one key per level (${keys?.length})`);
 check(keys.every((k) => typeof k === 'string' && k.length === 64), 'each key is 32 bytes of hex');
@@ -73,8 +69,6 @@ for (const count of [1, 2, RES, 64]) {
 const nativeKeys = encoder.deriveGranularKeys(KEY, RES);
 check(JSON.stringify(keys) === JSON.stringify(Array.from(nativeKeys)), 'chain matches the native derivation');
 
-// --- 2. access level clamps the decode ---
-// A coarser grant yields a coarser image, and a finer request is clamped.
 const full = emage.decode(j2k, { accessLevel: 'all', reduction: 0 });
 check(full.width === W && full.reduction === 0, 'access "all" decodes at full resolution');
 for (let grant = 0; grant < RES; ++grant) {
@@ -106,8 +100,6 @@ for (let level = 0; level < RES; ++level) {
         `K${level} also decodes a lower explicit resolution limit`);
 }
 emage.setCrypto({ key: KEY, accessLevel: 'all' });
-// Asking for full resolution while holding only the coarsest level must not
-// silently produce a wrong full-size image.
 const coarse = emage.decode(j2k, { key: keys[0], accessLevel: 0, reduction: 0 });
 check(coarse.width < full.width, 'coarse grant cannot yield a full-size image');
 for (let i = 0; i < 12; ++i) {
@@ -128,7 +120,6 @@ for (const level of [0, RES - 1]) {
     check(rejected, `modified level ${level} is rejected without downgrading the master key`);
 }
 
-// --- 3. the client only requests the levels it can read ---
 const asked = [];
 const transferred = [];
 let sot = 2;
@@ -202,7 +193,6 @@ try {
 check(wrongRejected && transferred.slice(beforeWrong).map(t => t.mode).join(',') === '0:0',
     'wrong key downloads only the coarsest zone and stops');
 
-// --- 4. upload surfaces the granular keys ---
 globalThis.fetch = async (url, init) => {
     if (init.method === 'POST') {
         const m = { width: W, height: H, layers: RES, bytes: j2k.length };
@@ -214,7 +204,6 @@ const up = await emage.upload(j2k);
 check(Array.isArray(up.granularKeys) && up.granularKeys.length === RES,
     `upload result carries ${RES} granular keys`);
 check(JSON.stringify(up.granularKeys) === JSON.stringify(keys), 'upload keys match the derived chain');
-// Keys must be derived client-side, never put on the wire.
 let sentKeys = false;
 globalThis.fetch = async (url, init) => {
     if (init.method === 'POST') {
@@ -228,7 +217,6 @@ globalThis.fetch = async (url, init) => {
 await emage.upload(j2k);
 check(!sentKeys, 'no key material is sent in the upload body');
 
-// --- 5. access level plumbing ---
 emage.setCrypto({ accessLevel: 3 });
 check(emage.crypto.accessLevel === 3, 'setCrypto stores accessLevel');
 emage.setCrypto({ accessLevel: 'all' });

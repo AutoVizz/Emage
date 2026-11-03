@@ -1,4 +1,3 @@
-// Header lookup must choose a bounded window without downloading trial packets.
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';

@@ -1,10 +1,6 @@
 import { wasmDir } from './wasm_test_path.mjs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-// Exercise the page event handlers with the real WASM codecs. The DOM canvas
-// and HTTP transport are adapters so these checks do not require a browser,
-// listening socket, or a running server. Server-style slices use actual PLT
-// packet lengths; they do not decrypt or inspect key material.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
@@ -196,7 +192,6 @@ assert.match(status(), /Password field/);
 assert.equal(status().includes('raw'), false, 'empty unauthorized responses explain how to fix authentication');
 assert.equal(store.size, 0);
 change('#pwInput', 'fixture-password');
-// Upload must retain the encoding key even after the input key changes.
 change('#keyInput', keys[1]);
 await click('#upBtn');
 assert.equal(store.size, 1);
@@ -213,7 +208,6 @@ await idle();
 await click('#decodeBtn');
 assert.equal($('#dstCanvas').width, 8);
 assert.match(status(), /MAC chain verified/);
-// Encryption is an encoding option; plaintext works even with an invalid key.
 $('#enc').checked = false;
 $('#enc').dispatchEvent(new dom.window.Event('change'));
 change('#keyInput', 'invalid');

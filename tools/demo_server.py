@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Forward all hosts to the Emage API; shape responses only when headers request it."""
 import argparse
 import http.client
 import json
@@ -44,8 +43,6 @@ class SharedBandwidth:
     def charge(self, size):
         if self.cancelled and self.cancelled.is_set():
             raise TransferCancelled()
-        # Reserve aggregate transmission time under the lock; sleep outside it
-        # so concurrent connections share bandwidth rather than multiply it.
         with self.lock:
             now = self.clock()
             finish = max(now, self.next_time) + size / self.rate
@@ -100,7 +97,6 @@ class DemoHandler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
     def log_message(self, format, *args):
-        # Never log passwords or shaping headers.
         super().log_message(format, *args)
 
     def origin_allowed(self, origin):
@@ -148,7 +144,6 @@ class DemoHandler(BaseHTTPRequestHandler):
             raise ValueError('Invalid X-Demo-Lane.')
         if bool(run) != bool(lane):
             raise ValueError('Supply X-Demo-Run and X-Demo-Lane together.')
-        # Ungrouped requests never share a bandwidth budget accidentally.
         bucket = (self.server.state.bucket(rate, run, lane) if run else SharedBandwidth(rate)) if rate else None
         cancelled = self.server.state.run_event(run) if run else None
         return latency, rate, bucket, cancelled
@@ -239,7 +234,6 @@ class DemoHandler(BaseHTTPRequestHandler):
                 upstream = urlsplit(self.server.state.api)
                 cls = http.client.HTTPSConnection if upstream.scheme == 'https' else http.client.HTTPConnection
                 connection = cls(upstream.hostname, upstream.port, timeout=30)
-                # A client Host or absolute request URL never selects the upstream.
                 path = upstream.path.rstrip('/') + '/' + self.path.lstrip('/')
                 blocked = HOP_HEADERS | {part.strip().lower() for part in self.headers.get('Connection', '').split(',')}
                 connection.putrequest(self.command, path, skip_accept_encoding=True)
@@ -312,7 +306,6 @@ def upload_password():
 
 
 def seed(state):
-    """Upload only reserved public fixtures, never send keys or overwrite users' paths."""
     password = upload_password()
     for path, image in state.images.items():
         endpoint = state.api + '/image/' + quote(path, safe='/')
@@ -343,13 +336,11 @@ def normalize_origin(value):
             parsed.username or parsed.password or parsed.path not in ('', '/') or
             parsed.query or parsed.fragment):
         raise ValueError('Public origins must be HTTP(S) origins without credentials or paths.')
-    # Validate the port before binding any listeners.
     parsed.port
     return f'{parsed.scheme}://{parsed.netloc}'
 
 
 def create_servers(state, ports=(3434, 3435, 3436, 3437), bind='127.0.0.1', public_origin=None, transport_origins=None):
-    """Four transfer listeners share one state; the first also serves controls."""
     if len(ports) != 4 or any(not 0 <= port <= 65535 for port in ports) or len({port for port in ports if port}) != sum(bool(port) for port in ports):
         raise ValueError('Specify four distinct transfer ports between 1 and 65535.')
     if public_origin:

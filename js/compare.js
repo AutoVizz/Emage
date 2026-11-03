@@ -41,8 +41,6 @@ function clear() {
 $('#runBtn').onclick = () => page.run('Running comparison…', async () => {
   clear();
   if (!$('#imgPath').value.trim()) throw new Error('Enter the server path of an image to compare.');
-  // Freeze configuration for all three passes. Run them sequentially so no
-  // pass shares network bandwidth or decoding time with another pass.
   const clients = strategies.map(() => page.client());
   const target = $('#sizeInput').value.trim();
   const results = [];
@@ -67,7 +65,6 @@ $('#runBtn').onclick = () => page.run('Running comparison…', async () => {
       throw error;
     });
     const total = performance.now() - start;
-    // Keep the final preview at its real decoded size for restricted keys.
     client.paintTo(canvas, result.decoded);
     const run = { bytes: result.transferredBytes, requests: result.httpRequests, first: first ?? total, total, width: result.decoded.width, height: result.decoded.height };
     runs[index] = run;

@@ -27,8 +27,6 @@ function syncEncryption() {
   const encrypted = $('#enc').checked;
   $('#keyWrap').style.opacity = encrypted ? 1 : .55;
   $('#keyGenBtn').disabled = !encrypted;
-  // A key can still be entered to decode an imported codestream in plaintext
-  // encoding mode; the checkbox controls encoding only.
   $('#encNote').textContent = encrypted ? 'AES-256-CTR zones, SHA3-256 MAC chain' : 'Plaintext codestream, no SEC marker';
 }
 page.onSync = () => {
@@ -143,7 +141,6 @@ $('#decodeBtn').onclick = () => page.run('Decoding loaded codestream…', async 
   const decoded = client.decode(codestream);
   paint(decoded);
   const zones = client.describeSecurityZone(codestream);
-  // A restricted imported key derives only the keys at or below its grant.
   const keys = zones.hasSec && decoded.keyLevel >= 0 ? client.granularKeys(decoded.keyLevel + 1) : [];
   drawKeys(keys, { width: decoded.width, height: decoded.height, layers: keys.length });
   setStatus(`Decoded ${decoded.width} × ${decoded.height} · ${zones.hasSec ? `key grants levels 0 to ${decoded.keyLevel}; MAC chain verified` : 'plaintext'}.`);
@@ -161,8 +158,6 @@ $('#downloadBtn').onclick = () => {
 };
 $('#upBtn').onclick = () => page.run('Uploading codestream…', async () => {
   if (!$('#imgPath').value.trim()) throw new Error('Enter an image path for the upload.');
-  // Preserve the key used to encode, even if the user has since selected
-  // another key. Imported codestreams can be uploaded without any key.
   const client = authenticatedClient({ key: encodedKey || '' });
   const result = await client.upload(codestream);
   codestream = client.j2k || codestream;

@@ -14,7 +14,7 @@ MACs, key derivation) lives in two Emscripten WebAssembly modules,
 `EmageWasmEncoder` and `EmageWasmDecoder`, served by the static client under `/wasm/`.
 The frontend wraps those modules in a small library, `emage.js`, and drives it
 from three demo pages. The end-to-end format and security model are documented in
-`DESIGN.md`; `context.md` summarizes the implementation state.
+`DESIGN.md`.
 
 Repository layout:
 
@@ -165,8 +165,7 @@ Node tests use the client’s `wasm/` assets by default; set
 `EMAGE_PASSWORD` set from the server's upload password.
 
 See `DESIGN.md` for the SEC marker format, key chain, MAC construction, and the
-metadata COM envelope, and `HANDOFF.md` for a snapshot of an in-progress
-debugging session.
+metadata COM envelope.
 
 The hosted client is https://autovizz.github.io/Emage/. Its Pages workflow
 checks out the public `Emage-Wasm` repository, compiles the codecs, runs tests,

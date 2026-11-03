@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Assemble the public static client, excluding backend code and credentials."""
 import argparse
 import json
 import os

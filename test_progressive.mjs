@@ -1,11 +1,4 @@
 import { wasmDir } from './wasm_test_path.mjs';
-// End-to-end verification of the resolution-level loading path in emage.js,
-// against the live server and the real WASM encoder/decoder.
-//
-// Covers level selection, clamping, progressive ordering, step de-duplication,
-// the decoder-run count compare.html reports, and the incremental request
-// pattern: each progressive frame adds exactly one range request for the new
-// packets, and no byte already downloaded is fetched again.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 
@@ -57,9 +50,6 @@ const up = await emage.upload(stream);
 log(`uploaded ${up.stored} ${up.width}x${up.height} layers=${up.layers}`);
 check(up.layers === RES, `server parsed layers=${up.layers}`);
 
-// Capture the X-Emage-Layers of every request a display() makes. A `stripLayers`
-// run rewrites the metadata response to the legacy shape (no decomposition
-// count) so the discovery-probe fallback is exercised against real windows.
 const realFetch = globalThis.fetch;
 function install(stripLayers = false) {
     const reqs = [];
@@ -99,7 +89,6 @@ function checkIncremental(label, reqs) {
     check(reqs[0] === 'meta' && reqs.filter((s) => s === 'meta').length === 1, `${label}: exactly one metadata request`);
 }
 
-// ---- progressive 256px -------------------------------------------------
 {
     const { res, reqs } = await pass('progressive 256px', '256px', {});
     check(res.displaySize.width === 256 && res.displaySize.height === 256, 'progressive 256px lands on 256x256');
@@ -116,7 +105,6 @@ function checkIncremental(label, reqs) {
     check(res.transferredBytes === res.stream.length, 'progressive 256px: transferred bytes equal the assembled stream (nothing re-fetched)');
 }
 
-// ---- one-shot 256px must fetch the same total in a single request -------
 let oneShot256 = 0;
 {
     const { res, reqs } = await pass('one-shot 256px', '256px', { progressive: false });
@@ -128,7 +116,6 @@ let oneShot256 = 0;
     log(`one-shot 256px bytes=${oneShot256}`);
 }
 
-// ---- one-shot full -----------------------------------------------------
 {
     const { res, reqs } = await pass("one-shot 'all'", 'all', { progressive: false });
     check(res.decodes === 1, "one-shot 'all' is exactly 1 decoder run");
@@ -138,7 +125,6 @@ let oneShot256 = 0;
     check(packets(reqs).length === 1, "one-shot 'all': a single range request");
 }
 
-// ---- full progressive: every level, coarsest first ---------------------
 {
     const { res, reqs } = await pass("progressive 'all'", 'all', {});
     const sizes = res.steps.map((s) => s.width);
@@ -153,14 +139,12 @@ let oneShot256 = 0;
     check(res.decodes === RES, `progressive 'all' is exactly ${RES} decodes`);
 }
 
-// ---- a progressive prefix costs no more than the one-shot of that prefix
 {
     const { res } = await pass('progressive 256px (byte accounting)', '256px', {});
     check(res.transferredBytes === oneShot256,
         `progressive 256px downloads ${res.transferredBytes} B, the same as one-shot ${oneShot256} B`);
 }
 
-// ---- over-fine target clamps to the coarsest level, never fails or repeats
 {
     const { res } = await pass('one-shot 8px (too small)', '8px', { progressive: false });
     check(res.decodedSize.width === W / 2 ** (RES - 1), 'over-fine target decodes at the coarsest size');
@@ -176,7 +160,6 @@ let oneShot256 = 0;
     checkIncremental('progressive 8px', reqs);
 }
 
-// ---- targets larger than the image, and percent targets ----------------
 {
     const { res } = await pass('one-shot 2048px (larger than full)', '2048px', { progressive: false });
     check(res.displaySize.width === W, 'target larger than full decodes at full size');
@@ -187,7 +170,6 @@ let oneShot256 = 0;
     check(res.displaySize.width === Math.round(W * 0.25), "one-shot '25%' decoded at the percent size");
 }
 
-// ---- preview() shares the path and must stay a single decode -----------
 {
     const reqs = install();
     let res;
@@ -198,7 +180,6 @@ let oneShot256 = 0;
     check(packets(reqs).length === 1, 'preview uses a single range request');
 }
 
-// ---- legacy server (no decomposition count): discovery probe -----------
 console.log('\n-- legacy server (no `layers` in meta) --');
 {
     const { res, reqs } = await pass('progressive 256px (legacy meta)', '256px', {}, true);
@@ -219,7 +200,6 @@ console.log('\n-- legacy server (no `layers` in meta) --');
     checkIncremental("progressive 'all' (legacy)", reqs);
 }
 
-// ---- cleanup (best effort) ---------------------------------------------
 try { await emage.remove(); log('removed ' + PATH); } catch (e) { log('already gone: ' + PATH); }
 
 console.log(failed ? `\n${failed} CHECK(S) FAILED` : '\nALL CHECKS PASSED');

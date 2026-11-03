@@ -1,12 +1,9 @@
 node_modules/
 __pycache__/
 
-# Portable editorial handoff (generated archive)
 /emage-blog-rewrite-context.tar.gz
 
-# Generated codec bundles served by the static client
 /wasm/
 
-# Static publication and CI codec checkout
 /_site/
 /.wasm-source/

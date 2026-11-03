@@ -36,7 +36,6 @@ emage.setServer({
 });
 emage.setCrypto({ key: KEY, iv: IV, accessLevel: -1 });
 
-// ---- encode + upload ------------------------------------------------------
 const stream = await emage.encodePixelData(px, W, H, {
     numComponents: 3, numResolutions: RES, numLayers: 1, enableSec: true,
 });
@@ -60,12 +59,6 @@ try {
 }
 
 if (uploaded) {
-    // ---- the property under test ------------------------------------------
-    // For each grant, the client fetches ONLY the window 0:a. The server drops
-    // TLM/PLM/PPM and PLT/PPT and rebuilds SOT/Psot, so every absolute offset
-    // moves. If the cumulative MAC still verifies, the zone table survived the
-    // rewrite -- which it can only do because Z is payload-relative and the SEC
-    // segment itself is copied verbatim.
     for (let a = 0; a < RES; ++a) {
         emage.setCrypto({ key: keys[a], iv: IV, accessLevel: a });
         let framed;
@@ -90,7 +83,6 @@ if (uploaded) {
         }
     }
 
-    // ---- plaintext control: same server, no SEC marker --------------------
     emage.setCrypto({ key: KEY, iv: IV, accessLevel: -1 });
     const plainPath = 'mac-probe-plain.j2k';
     emage.setServer({ imagePath: plainPath });

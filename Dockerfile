@@ -1,4 +1,3 @@
-# The named context points to the EmageWasm checkout.
 FROM emscripten/emsdk:6.0.9 AS wasm-build
 WORKDIR /src/wasm
 COPY --from=wasm-source . .

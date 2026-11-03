@@ -25,7 +25,7 @@ const runId = () => {
 };
 const sample = selector => manifest.images.find(image => image.id === $(selector).value) || manifest.images[0];
 let demoBase = serviceUrl(3434, siteConfig.demoUrl) || window.location.origin;
-try { demoBase = window.sessionStorage.getItem('emage.demoUrl') || demoBase; } catch { /* Optional browser storage. */ }
+try { demoBase = window.sessionStorage.getItem('emage.demoUrl') || demoBase; } catch { }
 const url = (path, origin = demoBase) => new URL(path.replace(/^\/+/, ''), origin.replace(/\/+$/, '') + '/').href;
 const hostnameInput = $('#demoServerUrl');
 if (demoBase !== window.location.origin) {
@@ -57,7 +57,7 @@ $('#demoConnection').onsubmit = async event => {
     $('#demoServerError').hidden = false;
     return;
   }
-  try { window.sessionStorage.setItem('emage.demoUrl', demoBase); } catch { /* Connect even if browser storage is unavailable. */ }
+  try { window.sessionStorage.setItem('emage.demoUrl', demoBase); } catch { }
   await connectProxy();
 };
 const shapingHeaders = (profile, run, lane) => connectionProfiles[profile] ? ({
@@ -121,7 +121,6 @@ $('#stopExperiment').onclick = () => {
   activeRun.controller.abort(new DOMException('Experiment stopped', 'AbortError'));
   status(activeRun.statusId, 'Stopping downloads…');
   for (const id of activeRun.ids) {
-    // Cancel through the configured proxy origin.
     fetch(url('/demo/cancel/' + id), { method: 'POST', keepalive: true }).catch(() => {});
   }
   sync();
@@ -253,7 +252,6 @@ $('#galleryRun').onclick = () => run('galleryStatus', 'Loading the two galleries
       throw error;
     }
   });
-  // Fetch full PNG bodies so both rows can send the same shaping headers.
   const originals = manifest.images.map(async (image, index) => {
     const source = url('/demo/png/' + image.id + '.png', transport.pngOrigins[index % transport.pngOrigins.length]);
     let blobUrl;
@@ -397,7 +395,6 @@ $('#ownerKeys').onclick = event => {
 async function accessView(side, signal) {
   resetCanvas(side + 'Canvas');
   const image = sample('#accessImage');
-  // The reader has no fallback to the master. Only this input supplies its key.
   const suppliedKey = side === 'owner' ? image.masterKey : key($('#readerKey').value);
   const instance = client(image, suppliedKey, $('#accessSpeed').value, runId(), side);
   const canvas = $('#' + side + 'Canvas');

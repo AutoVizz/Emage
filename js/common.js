@@ -11,7 +11,6 @@ export function serviceUrl(port, configured = '') {
   } else address.port = String(port);
   return address.origin;
 }
-/* Shared helpers, data and sidebar for every Emage page. */
 const ICONS = {
   up: 'M12 16V4M7 9l5-5 5 5M4 20h16', down: 'M12 4v12M7 11l5 5 5-5M4 20h16', bars: 'M5 20V11M12 20V4M19 20v-6',
   refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7', folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -22,7 +21,6 @@ const ICONS = {
   key: 'M8 11a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM11 12l9-9M16 7l3 3', logo: 'M4 20a6 6 0 0 1 6-6M4 20a11 11 0 0 1 11-11M4 20A16 16 0 0 1 20 4'
 };
 export const icon = (n, s = 17, w = 1.8) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICONS[n]}"/></svg>`;
-/* Sidebar: <aside id="side" data-active="upload|download|compare"></aside> */
 function renderSidebar() {
   const side = $('#side'); if (!side) return;
   const pages = [['upload', 'index.html', 'up', 'Encrypt & upload'], ['download', 'downloader.html', 'down', 'Progressive download'], ['compare', 'compare.html', 'bars', 'Compare strategies'], ['blog', 'blog.html', 'bars', 'How Emage works']];
@@ -33,7 +31,6 @@ function renderSidebar() {
   <div class="apibox">API server<span><i class="dot"></i><b id="serverHost" class="mono">Not connected</b></span></div>`;
 }
 
-/* Fill every <i data-i="name" data-s="size"> placeholder with an icon. */
 function hydrateIcons(root = document) {
   root.querySelectorAll('i[data-i]').forEach(el => { el.outerHTML = icon(el.dataset.i, +el.dataset.s || 17); });
 }
@@ -83,8 +80,6 @@ export async function copyText(value, message = 'Copied to clipboard.') {
   catch { setStatus('Clipboard unavailable. Select the key text and copy it manually.', true); }
 }
 
-// Each operation gets its own configuration. Background browsing never changes
-// a foreground upload path or the key used to encode the local codestream.
 export class Page {
   constructor() {
     this.engine = null;
@@ -109,11 +104,9 @@ export class Page {
     if (connected !== undefined) host.closest('.apibox').classList.toggle('connected', connected);
   }
   remember() {
-    // Keep connection and current key across navigation in this tab. Passwords
-    // are never persisted; the key ring is saved only through the Add action.
     try {
       sessionStorage.setItem('emage.connection.v1', JSON.stringify({ baseUrl: $('#serverUrl').value.trim(), imagePath: $('#imgPath').value.trim(), key: $('#keyInput').value.trim() }));
-    } catch { /* the UI also works without storage */ }
+    } catch { }
   }
   client({ path = $('#imgPath').value.trim(), key = $('#keyInput').value.trim(), server = $('#serverUrl').value.trim(), password = $('#pwInput')?.value || '' } = {}) {
     if (!this.engine) throw new Error('WebAssembly codecs are still loading.');
@@ -158,7 +151,6 @@ export class Page {
   }
 }
 
-// The API returns a flat list; folders are derived locally from its paths.
 export class FileBrowser {
   constructor(page, { badges = false, onOpen, onSelect = () => {}, onUpdate = () => {} } = {}) {
     this.page = page;
@@ -186,7 +178,6 @@ export class FileBrowser {
     const tick = ++this.tick;
     const client = this.page.client({ key: '' });
     this.page.updateHost(false);
-    // Clear stale paths even when the new server fails to respond.
     this.files = [];
     this.metas.clear();
     this.selected = null;
@@ -205,7 +196,7 @@ export class FileBrowser {
         try {
           const meta = await client.meta({ imagePath: file.path.split('/').map(encodeURIComponent).join('/') });
           if (tick === this.tick) this.metas.set(file.path, meta);
-        } catch { /* individual invalid codestreams remain visible */ }
+        } catch { }
       }
     }));
     if (tick !== this.tick) return;
