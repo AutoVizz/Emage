@@ -1,7 +1,7 @@
 services:
   client:
     ports:
-      - "${CLIENT_PORT:-3433}:80"
+      - "7515:7515"
     build:
       context: .
       additional_contexts:

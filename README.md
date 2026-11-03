@@ -21,8 +21,9 @@ controller with one Compose command. The site is `http://emage.gqvz.xyz/`;
 `api-emage.gqvz.xyz` forwards directly to .NET on internal port 3233.
 `api1`–`api4-emage.gqvz.xyz` forward to Python ports 3434–3437 respectively.
 Other hosts matching `*-emage.gqvz.xyz` route to Python's first listener.
-Nginx publishes HTTP on port 80. The client discovers service addresses from the
-page's hostname and protocol. HTTPS can terminate at a reverse proxy in front
+Only nginx publishes HTTP port 7515; all other services stay inside Docker.
+Nginx rejects unrelated hostnames. The client discovers service addresses from the
+page's hostname and protocol. Cloudflare handles HTTPS in front
 of nginx; forward the original Host and X-Forwarded-Proto headers.
 
 The upload password is entered in the uploader and never embedded in the site.
@@ -44,9 +45,9 @@ static client with the sibling WASM checkout:
 docker compose up --build -d --remove-orphans
 ```
 
-Open `http://localhost:3433/`. This Compose file runs only the client. It does
-not run the image API, demo proxy or rebuild controller. If the backend console
-already uses local port 3433, set `CLIENT_PORT=3438` for this optional local client.
+Open `http://emage.localhost:7515/`. This Compose file runs only the client. It does
+not run the image API, demo proxy or rebuild controller. Stop the full deployment
+before starting this optional client on the same port.
 `EMAGE_API_URL` and `EMAGE_DEMO_URL` are public build-time service addresses.
 
 For another static host, compile the codecs into `wasm/`, run
