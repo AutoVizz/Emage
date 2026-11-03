@@ -64,6 +64,15 @@ class AdminTests(unittest.TestCase):
         handler.do_POST()
         self.assertEqual(handler.status, 403)
 
+    def test_https_admin_accepts_matching_origin_behind_nginx(self):
+        self.deployment.infer_origin = True
+        self.deployment.request = Mock(return_value={'state': 'queued'})
+        handler = self.handler(body={'password': 'test-password'}, origin='https://emage.gqvz.xyz')
+        handler.headers['Host'] = 'emage.gqvz.xyz'
+        handler.headers['X-Forwarded-Proto'] = 'https'
+        handler.do_POST()
+        self.assertEqual(handler.status, 202)
+
     def test_missing_or_foreign_origins_cannot_request_a_rebuild(self):
         self.deployment.request = Mock()
         for origin in [None, 'https://foreign.example']:

@@ -280,7 +280,8 @@ class AdminHandler(BaseHTTPRequestHandler):
         if urlsplit(self.path).path != '/admin/api/rebuild':
             return self.respond(404, {'error': 'Not found.'})
         origin = self.headers.get('Origin')
-        inferred_origin = ('http://' + self.headers.get('Host', '')) if getattr(deployment, 'infer_origin', False) else None
+        scheme = self.headers.get('X-Forwarded-Proto', 'http')
+        inferred_origin = (scheme + '://' + self.headers.get('Host', '')) if scheme in ('http', 'https') and getattr(deployment, 'infer_origin', False) else None
         if origin not in deployment.origins and not (inferred_origin and origin == inferred_origin):
             return self.respond(403, {'error': 'Origin not allowed.'})
         try:

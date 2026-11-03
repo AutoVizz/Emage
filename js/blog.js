@@ -47,7 +47,8 @@ $('#demoConnection').onsubmit = async event => {
     const local = /^(localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[a-f\d:]+\])(?::\d+)?\/?$/i.test(value);
     const fullUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
     const address = new URL(fullUrl ? value : `${local ? 'http' : 'https'}://${value}`);
-    if (!fullUrl && !/:\d+\/?$/.test(value)) address.port = '3434';
+    if (address.hostname.startsWith('emage.')) address.hostname = `api1.${address.hostname}`;
+    else if (!fullUrl && !address.hostname.includes('.emage.') && !/:\d+\/?$/.test(value)) address.port = '3434';
     if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password || address.search || address.hash || address.pathname !== '/') throw new Error('Enter a hostname or HTTP(S) origin, without a path or credentials.');
     demoBase = address.origin;
   } catch (error) {
@@ -438,7 +439,7 @@ async function connectProxy() {
     ownerKeys();
     const origins = [...(transport?.emageOrigins || []), ...(transport?.pngOrigins || [])];
     ready = Boolean(config?.ready && config?.images === 10 && config?.shaping === 'headers' && config?.profiles?.demo?.bytesPerSecond === 2 * 1024 * 1024 && transport?.emageOrigins?.length === 2 && transport?.pngOrigins?.length === 2 && new Set(origins).size === 4 && origins.every(origin => ['http:', 'https:'].includes(new URL(origin).protocol)));
-    status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Enter the proxy hostname above and connect. Python listens on the four transfer ports, 3434–3437; controls use 3434. Check the proxy API URL, upload password and allowed site origin; restart it after changing settings. The proxy needs the 2 MiB/s profile and header controls. For a local proxy, use npm run blog.', !ready);
+    status('bootStatus', ready ? 'Experiments ready. Demo speed is 2 MiB/s. Use Stop experiment to switch tests or change settings.' : 'Enter the proxy hostname above and connect. The hosted proxy uses api1–api4 subdomains; local Python uses ports 3434–3437. Check the proxy API URL, upload password and allowed site origin; restart it after changing settings. The proxy needs the 2 MiB/s profile and header controls. For a local proxy, use npm run blog.', !ready);
   } catch (error) {
     status('bootStatus', 'Demo setup failed: ' + Emage.messageOf(error), true);
   } finally {

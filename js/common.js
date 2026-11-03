@@ -6,7 +6,9 @@ export function serviceUrl(port, configured = '') {
   if (configured) return configured;
   const address = new URL(window.location.origin);
   if (address.hostname.endsWith('.github.io')) return port === 3233 ? 'http://localhost:3233' : '';
-  address.port = String(port);
+  if (address.hostname.startsWith('emage.')) {
+    address.hostname = `${port === 3233 ? 'api' : 'api1'}.${address.hostname}`;
+  } else address.port = String(port);
   return address.origin;
 }
 /* Shared helpers, data and sidebar for every Emage page. */

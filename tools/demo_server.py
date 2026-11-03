@@ -109,7 +109,9 @@ class DemoHandler(BaseHTTPRequestHandler):
         if not origin or not getattr(self.server.state, 'infer_client_origin', False):
             return False
         page, proxy = urlsplit(origin), urlsplit('http://' + self.headers.get('Host', ''))
-        return page.scheme in ('http', 'https') and bool(page.hostname) and page.hostname == proxy.hostname
+        namespace = proxy.hostname.split('.emage.', 1)[1] if proxy.hostname and '.emage.' in proxy.hostname else None
+        same_site = page.hostname == proxy.hostname or (namespace and page.hostname == 'emage.' + namespace)
+        return page.scheme in ('http', 'https') and bool(page.hostname) and bool(same_site)
 
     def end_headers(self):
         origin = self.headers.get('Origin')
@@ -182,7 +184,12 @@ class DemoHandler(BaseHTTPRequestHandler):
                 if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
                     return self.json({'error': 'Invalid public host.'}, 400)
                 host = f'[{parsed.hostname}]' if ':' in parsed.hostname else parsed.hostname
-                origins = [f'{parsed.scheme}://{host}:{port}' for port in self.server.state.transport_ports]
+                if '.emage.' in host:
+                    namespace = 'emage.' + host.split('.emage.', 1)[1]
+                    public_port = f':{parsed.port}' if parsed.port else ''
+                    origins = [f'{parsed.scheme}://api{n}.{namespace}{public_port}' for n in range(1, 5)]
+                else:
+                    origins = [f'{parsed.scheme}://{host}:{port}' for port in self.server.state.transport_ports]
                 transport = {'emageOrigins': origins[:2], 'pngOrigins': origins[2:]}
             return self.json({'ready': True, 'profiles': PROFILES, 'images': len(self.server.state.images),
                               'publicSamples': True, 'transport': transport, 'shaping': 'headers'})

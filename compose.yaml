@@ -9,4 +9,6 @@ services:
       args:
         EMAGE_API_URL: ${EMAGE_API_URL:-}
         EMAGE_DEMO_URL: ${EMAGE_DEMO_URL:-}
+    environment:
+      EMAGE_HOST: ${EMAGE_HOST:-emage.localhost}
     restart: unless-stopped
