@@ -136,16 +136,16 @@ class ProxyTests(unittest.TestCase):
 
     def test_domain_transport_and_site_cors_use_https_without_internal_ports(self):
         with patch.object(self.state, 'infer_client_origin', True):
-            for host in ('api1.emage.gqvz.xyz', 'api4.emage.gqvz.xyz', 'other.emage.gqvz.xyz'):
+            for host in ('api1-emage.gqvz.xyz', 'api4-emage.gqvz.xyz', 'other-emage.gqvz.xyz'):
                 status, body, headers = self.request('/demo/config', {
                     'Host': host, 'X-Forwarded-Proto': 'https', 'Origin': 'https://emage.gqvz.xyz'})
                 self.assertEqual(status, 200)
                 self.assertEqual(headers['Access-Control-Allow-Origin'], 'https://emage.gqvz.xyz')
                 transport = json.loads(body)['transport']
                 self.assertEqual(transport['emageOrigins'] + transport['pngOrigins'],
-                    [f'https://api{n}.emage.gqvz.xyz' for n in range(1, 5)])
+                    [f'https://api{n}-emage.gqvz.xyz' for n in range(1, 5)])
             _, _, headers = self.request('/demo/config', {
-                'Host': 'api1.emage.gqvz.xyz', 'Origin': 'https://emage.foreign.xyz'})
+                'Host': 'api1-emage.gqvz.xyz', 'Origin': 'https://emage.foreign.xyz'})
             self.assertIsNone(headers.get('Access-Control-Allow-Origin'))
 
     def test_header_controls_apply_delay_and_are_not_forwarded(self):

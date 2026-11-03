@@ -7,7 +7,7 @@ export function serviceUrl(port, configured = '') {
   const address = new URL(window.location.origin);
   if (address.hostname.endsWith('.github.io')) return port === 3233 ? 'http://localhost:3233' : '';
   if (address.hostname.startsWith('emage.')) {
-    address.hostname = `${port === 3233 ? 'api' : 'api1'}.${address.hostname}`;
+    address.hostname = `${port === 3233 ? 'api' : 'api1'}-${address.hostname}`;
   } else address.port = String(port);
   return address.origin;
 }

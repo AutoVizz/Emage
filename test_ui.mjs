@@ -373,8 +373,8 @@ assert.equal($('#serverUrl').value, 'http://203.0.113.10:3233', 'raw-IP deployme
 console.log('PASS cohosted client: API defaults to the page host on port 3233');
 globalThis.sessionStorage = storage();
 await openPage('uploader', 'https://emage.gqvz.xyz/');
-assert.equal($('#serverUrl').value, 'https://api.emage.gqvz.xyz');
+assert.equal($('#serverUrl').value, 'https://api-emage.gqvz.xyz');
 const { serviceUrl } = await import('./js/common.js');
-assert.equal(serviceUrl(3434), 'https://api1.emage.gqvz.xyz');
+assert.equal(serviceUrl(3434), 'https://api1-emage.gqvz.xyz');
 dom.window.close();
 console.log('ALL UI INTEGRATION CHECKS PASSED');

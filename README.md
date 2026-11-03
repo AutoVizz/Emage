@@ -18,9 +18,9 @@ credentials are excluded. Asset URLs work under the `/Emage/` project path.
 
 The portable deployment runs nginx, the client, API, transfer proxy and rebuild
 controller with one Compose command. The site is `https://emage.gqvz.xyz/`;
-`api.emage.gqvz.xyz` forwards directly to .NET on internal port 3233.
-`api1`–`api4.emage.gqvz.xyz` forward to Python ports 3434–3437 respectively.
-Other subdomains under `emage.gqvz.xyz` route to Python's first listener.
+`api-emage.gqvz.xyz` forwards directly to .NET on internal port 3233.
+`api1`–`api4-emage.gqvz.xyz` forward to Python ports 3434–3437 respectively.
+Other hosts matching `*-emage.gqvz.xyz` route to Python's first listener.
 Only nginx publishes ports 80 and 443. The client discovers these HTTPS service
 addresses automatically. Certbot obtains and renews certificates for the six
 named hosts once their DNS records point to this machine and port 80 is reachable.

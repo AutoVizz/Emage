@@ -47,8 +47,8 @@ $('#demoConnection').onsubmit = async event => {
     const local = /^(localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[a-f\d:]+\])(?::\d+)?\/?$/i.test(value);
     const fullUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(value);
     const address = new URL(fullUrl ? value : `${local ? 'http' : 'https'}://${value}`);
-    if (address.hostname.startsWith('emage.')) address.hostname = `api1.${address.hostname}`;
-    else if (!fullUrl && !address.hostname.includes('.emage.') && !/:\d+\/?$/.test(value)) address.port = '3434';
+    if (address.hostname.startsWith('emage.')) address.hostname = `api1-${address.hostname}`;
+    else if (!fullUrl && !address.hostname.includes('-emage.') && !/:\d+\/?$/.test(value)) address.port = '3434';
     if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password || address.search || address.hash || address.pathname !== '/') throw new Error('Enter a hostname or HTTP(S) origin, without a path or credentials.');
     demoBase = address.origin;
   } catch (error) {

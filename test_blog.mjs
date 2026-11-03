@@ -479,10 +479,10 @@ $('#demoServerUrl').value = '203.0.113.10';
 await $('#demoConnection').onsubmit(new dom.window.Event('submit', { cancelable: true }));
 assert.equal(window.sessionStorage.getItem('emage.demoUrl'), 'http://203.0.113.10:3434');
 assert.equal(configRequests.at(-1), 'http://203.0.113.10:3434/demo/config');
-for (const host of ['emage.gqvz.xyz', 'api1.emage.gqvz.xyz', 'https://emage.gqvz.xyz']) {
+for (const host of ['emage.gqvz.xyz', 'api1-emage.gqvz.xyz', 'https://emage.gqvz.xyz']) {
   $('#demoServerUrl').value = host;
   await $('#demoConnection').onsubmit(new dom.window.Event('submit', { cancelable: true }));
-  assert.equal(configRequests.at(-1), 'https://api1.emage.gqvz.xyz/demo/config');
+  assert.equal(configRequests.at(-1), 'https://api1-emage.gqvz.xyz/demo/config');
 }
 const attempts = configRequests.length;
 for (const value of ['', 'https://user:secret@host', 'https://host/path', 'host?secret=1', 'ftp://host']) {
