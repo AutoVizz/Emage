@@ -116,37 +116,28 @@ class Deployment:
     def resolve_refs(self):
         settings = read_env(self.directory / '.env')
         settings.update({key: os.environ[key] for key in ('GITHUB_OWNER', *REPOSITORIES) if key in os.environ})
-        token = settings.get('GITHUB_TOKEN', '')
-        if not token:
-            raise RuntimeError('Set GITHUB_TOKEN in the deployment .env file.')
         owner = settings.get('GITHUB_OWNER', 'AutoVizz')
         if not re.fullmatch(r'[A-Za-z0-9-]+', owner):
             raise RuntimeError('Invalid GITHUB_OWNER.')
         resolved = {}
-        with tempfile.TemporaryDirectory(prefix='emage-git-') as directory:
-            secret = Path(directory) / 'token'
-            secret.write_text(token)
-            secret.chmod(0o600)
-            helper = Path(directory) / 'askpass'
-            helper.write_text('#!/bin/sh\ncase "$1" in\n*Username*) printf "%s\\n" x-access-token;;\n*Password*) cat "$EMAGE_GIT_TOKEN_FILE";;\nesac\n')
-            helper.chmod(0o700)
-            env = {**os.environ, 'GIT_ASKPASS': str(helper), 'GIT_TERMINAL_PROMPT': '0',
-                   'EMAGE_GIT_TOKEN_FILE': str(secret)}
-            for key, repository in REPOSITORIES.items():
-                ref = settings.get(key, 'main')
-                if re.fullmatch(r'[a-fA-F0-9]{40}', ref):
-                    resolved[key] = ref
-                    continue
-                patterns = [ref, ref + '^{}'] if ref.startswith('refs/') else [
-                    'refs/heads/' + ref, 'refs/tags/' + ref, 'refs/tags/' + ref + '^{}']
-                output = subprocess.check_output(['git', '-c', 'credential.helper=', 'ls-remote',
-                    f'https://github.com/{owner}/{repository}.git', *patterns],
-                    env=env, text=True, stderr=subprocess.DEVNULL, timeout=45)
-                refs = dict((name, commit) for commit, name in (line.split() for line in output.splitlines()))
-                commit = refs.get('refs/heads/' + ref) or refs.get('refs/tags/' + ref + '^{}') or refs.get('refs/tags/' + ref) or refs.get(ref + '^{}') or refs.get(ref)
-                if not commit:
-                    raise RuntimeError(f'Cannot resolve {repository} ref {ref}.')
-                resolved[key] = commit
+        env = {key: value for key, value in os.environ.items()
+               if key not in ('GITHUB_TOKEN', 'GIT_ASKPASS', 'EMAGE_GIT_TOKEN_FILE')}
+        env['GIT_TERMINAL_PROMPT'] = '0'
+        for key, repository in REPOSITORIES.items():
+            ref = settings.get(key, 'main')
+            if re.fullmatch(r'[a-fA-F0-9]{40}', ref):
+                resolved[key] = ref
+                continue
+            patterns = [ref, ref + '^{}'] if ref.startswith('refs/') else [
+                'refs/heads/' + ref, 'refs/tags/' + ref, 'refs/tags/' + ref + '^{}']
+            output = subprocess.check_output(['git', '-c', 'credential.helper=', 'ls-remote',
+                f'https://github.com/{owner}/{repository}.git', *patterns],
+                env=env, text=True, stderr=subprocess.DEVNULL, timeout=45)
+            refs = dict((name, commit) for commit, name in (line.split() for line in output.splitlines()))
+            commit = refs.get('refs/heads/' + ref) or refs.get('refs/tags/' + ref + '^{}') or refs.get('refs/tags/' + ref) or refs.get(ref + '^{}') or refs.get(ref)
+            if not commit:
+                raise RuntimeError(f'Cannot resolve {repository} ref {ref}.')
+            resolved[key] = commit
         return resolved
 
     def progress(self, state, message):

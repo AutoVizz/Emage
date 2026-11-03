@@ -130,15 +130,15 @@ class AdminTests(unittest.TestCase):
         self.deployment.check_health()
         self.deployment.request.assert_not_called()
 
-    def test_git_refs_are_resolved_without_passing_the_token_in_command_arguments(self):
-        (Path(self.directory.name) / '.env').write_text('GITHUB_TOKEN=test-token\n')
+    def test_git_refs_are_resolved_anonymously_without_deployment_credentials(self):
+        (Path(self.directory.name) / '.env').write_text('EMAGE_UPLOAD_PASSWORD=test-password\n')
         commits = ['a' * 40, 'b' * 40, 'c' * 40]
         calls = []
         def remote(command, **options):
-            self.assertNotIn('test-token', ' '.join(command))
-            token_file = Path(options['env']['EMAGE_GIT_TOKEN_FILE'])
-            self.assertEqual(token_file.read_text(), 'test-token')
-            self.assertEqual(token_file.stat().st_mode & 0o777, 0o600)
+            self.assertIn('credential.helper=', command)
+            self.assertEqual(options['env']['GIT_TERMINAL_PROMPT'], '0')
+            self.assertNotIn('GIT_ASKPASS', options['env'])
+            self.assertNotIn('GITHUB_TOKEN', options['env'])
             calls.append(command)
             return commits[len(calls) - 1] + '\trefs/heads/main\n'
         with patch('tools.deployment_admin.subprocess.check_output', side_effect=remote):
