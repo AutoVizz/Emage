@@ -39,7 +39,7 @@ COPY demo-assets/ ./demo-assets/
 COPY vendor/noble-sha3.js ./vendor/noble-sha3.js
 COPY tools/build_site.py ./tools/build_site.py
 COPY --from=wasm-build /tmp/wasm-assets/ /tmp/wasm-assets/
-ARG EMAGE_API_URL=http://localhost:3233
+ARG EMAGE_API_URL=
 ARG EMAGE_DEMO_URL=
 RUN python3 tools/build_site.py --wasm-dir /tmp/wasm-assets --output /tmp/site
 

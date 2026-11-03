@@ -16,9 +16,9 @@ from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 LOG = logging.getLogger('deployment')
-SERVICES = ('server', 'demo')
-BUILD_SERVICES = ('server', 'demo')
-REPOSITORIES = {'SERVER_REF': 'Emage-Server', 'CLIENT_REF': 'Emage'}
+SERVICES = ('server', 'client', 'demo')
+BUILD_SERVICES = ('server', 'client', 'demo')
+REPOSITORIES = {'SERVER_REF': 'Emage-Server', 'WASM_REF': 'Emage-Wasm', 'CLIENT_REF': 'Emage'}
 ADMIN_FILES = {
     '/': ('admin.html', 'text/html; charset=utf-8'),
     '/admin': ('admin.html', 'text/html; charset=utf-8'),
@@ -192,7 +192,7 @@ class Deployment:
             self.progress('resolving', 'Resolving the configured GitHub branches.')
             refs = self.resolve_refs()
             args = [argument for key, commit in refs.items() for argument in ('--build-arg', f'{key}={commit}')]
-            self.progress('building', 'Building the server and blog proxy. Current backend services stay running.')
+            self.progress('building', 'Building the server, client codecs and transfer proxy. Current services stay running.')
             subprocess.run(self.compose('build', *args, *BUILD_SERVICES), check=True, timeout=3600)
             self.progress('deploying', 'Starting the rebuilt application services.')
             targets = list(SERVICES)
@@ -200,7 +200,7 @@ class Deployment:
             subprocess.run(self.compose('up', '-d', '--no-build', '--no-deps', '--force-recreate', *targets), check=True, timeout=180)
             self.progress('verifying', 'Checking the new services.')
             self.wait_ready()
-            self.progress('succeeded', 'The backend is updated and healthy. The client deploys independently through GitHub Pages.')
+            self.progress('succeeded', 'The client, server and transfer proxy are updated and healthy.')
         except Exception:
             LOG.exception('Deployment failed')
             if deployed and previous:
@@ -279,7 +279,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         deployment = self.server.deployment
         if urlsplit(self.path).path != '/admin/api/rebuild':
             return self.respond(404, {'error': 'Not found.'})
-        if self.headers.get('Origin') not in deployment.origins:
+        origin = self.headers.get('Origin')
+        inferred_origin = ('http://' + self.headers.get('Host', '')) if getattr(deployment, 'infer_origin', False) else None
+        if origin not in deployment.origins and not (inferred_origin and origin == inferred_origin):
             return self.respond(403, {'error': 'Origin not allowed.'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
@@ -306,6 +308,7 @@ def main():
         os.environ.get('ADMIN_PUBLIC_ORIGIN', 'http://localhost:3433'),
         cooldown=int(os.environ.get('ADMIN_REBUILD_COOLDOWN', '300')),
         grace=int(os.environ.get('ADMIN_STARTUP_GRACE', '180')))
+    deployment.infer_origin = not bool(os.environ.get('ADMIN_PUBLIC_ORIGIN'))
     server = ThreadingHTTPServer(('0.0.0.0', 8080), AdminHandler)
     server.daemon_threads = True
     server.deployment = deployment

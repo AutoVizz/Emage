@@ -29,7 +29,7 @@ def build(output, wasm, api_url='', demo_url='', source=ROOT):
     output, wasm, source = Path(output).resolve(), Path(wasm).resolve(), Path(source).resolve()
     if output == source or source.is_relative_to(output) or wasm == output or wasm.is_relative_to(output):
         raise ValueError('Output must be separate from the source and codec directories.')
-    settings = {'apiUrl': public_url(api_url, 'http://localhost:3233'), 'demoUrl': public_url(demo_url)}
+    settings = {'apiUrl': public_url(api_url), 'demoUrl': public_url(demo_url)}
     for name in CODECS:
         path = wasm / name
         if not path.is_file() or path.is_symlink():

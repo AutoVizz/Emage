@@ -103,9 +103,17 @@ class DemoHandler(BaseHTTPRequestHandler):
         # Never log passwords or shaping headers.
         super().log_message(format, *args)
 
+    def origin_allowed(self, origin):
+        if origin in self.server.state.allowed_origins:
+            return True
+        if not origin or not getattr(self.server.state, 'infer_client_origin', False):
+            return False
+        page, proxy = urlsplit(origin), urlsplit('http://' + self.headers.get('Host', ''))
+        return page.scheme in ('http', 'https') and bool(page.hostname) and page.hostname == proxy.hostname
+
     def end_headers(self):
         origin = self.headers.get('Origin')
-        if origin in self.server.state.allowed_origins:
+        if self.origin_allowed(origin):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
             self.send_header('Timing-Allow-Origin', origin)
@@ -144,7 +152,7 @@ class DemoHandler(BaseHTTPRequestHandler):
         return latency, rate, bucket, cancelled
 
     def do_OPTIONS(self):
-        if self.headers.get('Origin') not in self.server.state.allowed_origins:
+        if not self.origin_allowed(self.headers.get('Origin')):
             return self.proxy()
         self.send_response(204)
         self.send_header('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS')
@@ -158,7 +166,7 @@ class DemoHandler(BaseHTTPRequestHandler):
         if not match:
             return self.proxy()
         origin = self.headers.get('Origin')
-        if origin and origin not in self.server.state.allowed_origins:
+        if origin and not self.origin_allowed(origin):
             return self.json({'error': 'Origin not allowed.'}, 403)
         self.server.state.cancel(match[1])
         return self.json({'stopped': True})
@@ -242,7 +250,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                 response = connection.getresponse()
                 status = response.status
                 blocked = HOP_HEADERS | {part.strip().lower() for part in response.getheader('Connection', '').split(',')}
-                replace_cors = self.headers.get('Origin') in self.server.state.allowed_origins
+                replace_cors = self.origin_allowed(self.headers.get('Origin'))
                 headers = [(name, value) for name, value in response.getheaders()
                            if name.lower() not in blocked and not (replace_cors and name.lower().startswith('access-control-'))]
             self.send_response(status)
@@ -344,6 +352,7 @@ def create_servers(state, ports=(3434, 3435, 3436, 3437), bind='127.0.0.1', publ
         if len(transport_origins) != 4 or len(set(transport_origins)) != 4:
             raise ValueError('Specify four distinct public transport origins.')
     state.allowed_origins = {public_origin} if public_origin else {'https://autovizz.github.io'}
+    state.infer_client_origin = not bool(public_origin)
     if transport_origins:
         state.transport = {'emageOrigins': transport_origins[:2], 'pngOrigins': transport_origins[2:]}
     servers = []

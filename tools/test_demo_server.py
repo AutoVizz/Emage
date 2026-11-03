@@ -124,6 +124,16 @@ class ProxyTests(unittest.TestCase):
             sleep.assert_not_called()
             bucket.assert_not_called()
 
+    def test_same_host_http_client_cors_is_inferred_without_configuration(self):
+        with patch.object(self.state, 'infer_client_origin', True):
+            status, body, headers = self.request('/demo/config', {
+                'Host': '203.0.113.10:3434', 'Origin': 'http://203.0.113.10:3433'})
+            self.assertEqual(status, 200)
+            self.assertEqual(headers['Access-Control-Allow-Origin'], 'http://203.0.113.10:3433')
+            status, body, headers = self.request('/demo/config', {
+                'Host': '203.0.113.10:3434', 'Origin': 'http://different.example:3433'})
+            self.assertIsNone(headers.get('Access-Control-Allow-Origin'))
+
     def test_header_controls_apply_delay_and_are_not_forwarded(self):
         headers = {'X-Demo-Latency-Ms': '60', 'X-Demo-Bytes-Per-Second': '5000',
                    'X-Demo-Run': 'abcdef12', 'X-Demo-Lane': 'compare', 'X-Emage-Layers': '0:2'}

@@ -16,16 +16,21 @@ Only public HTML, styles, browser scripts, images and the four compiled WASM
 artifacts are uploaded. Backend code, the rebuild console, `.env` files and Git
 credentials are excluded. Asset URLs work under the `/Emage/` project path.
 
-The server deploys separately. Enter its URL in the **Server URL** field;
-`http://localhost:3233` works when the API runs on the visitor's machine.
-For a remote server, use its public HTTPS URL. The upload password is entered
-in the uploader and is never embedded in the site.
+The portable deployment runs the client, API, transfer proxy and rebuild
+controller together with one Compose command. Open `http://YOUR_IP:3433/` or
+`http://YOUR_IP:3433/blog.html`. The client infers that host's API on 3233 and
+proxy on 3434, so a raw-IP HTTP deployment needs no domain or TLS setup.
+Python listens only on 3434–3437. Port 3434 also serves demo controls.
 
-Repository variables `EMAGE_API_URL` and `EMAGE_DEMO_URL` can set default public
-API and demo-control addresses during the Pages build. They are URLs, not
-secrets. `WASM_REF` can select a WASM branch, tag or commit; the default is `main`.
-The manual workflow also accepts a WASM ref. A WASM-only change can be published
-by manually running the Pages workflow without rebuilding the server.
+The upload password is entered in the uploader and never embedded in the site.
+`/admin` uses the same password to rebuild the server, client codecs and proxy;
+health failures trigger the same checked rollout and rollback.
+
+GitHub Pages remains an independent static client option. Enter a public HTTPS
+API/proxy URL when using it remotely: browsers block remote HTTP endpoints from
+an HTTPS page. Public repository variables `EMAGE_API_URL` and `EMAGE_DEMO_URL`
+can override service defaults. `WASM_REF` selects a WASM branch, tag or commit;
+the default is `main`. No application password belongs in repository variables.
 
 ## Run the client locally
 
@@ -116,7 +121,7 @@ Dark options. System is the default; explicit choices are saved in local storage
 and applied before the page paints. Shared color variables in `css/theme.css`
 keep surfaces, controls, and feedback consistent. The selector stays usable during experiments.
 
-Start the separate backend deployment and open the Pages article. Connect it
+Start the unified deployment and open `http://YOUR_IP:3433/blog.html`. Connect it
 to the public HTTPS proxy hostname. For local proxy development, generate the
 fixtures and run `python3 tools/demo_server.py`; serve the static
 client separately. The Docker deployment uses Python ports 3434–3437 and .NET port 3233.
@@ -125,7 +130,7 @@ Python listens only on **3434–3437**. Ports 3434–3435 carry the Emage row,
 and 3436–3437 carry the PNG row. Port 3434 also serves `/demo/config` and run
 cancellation, so no fifth proxy/control port is needed. All four listeners
 forward API reads, uploads and deletes to the same fixed .NET upstream on 3233.
-The client remains a separate static deployment.
+The client container serves the static site in the same Compose deployment.
 
 Shaping is opt-in through request headers:
 

@@ -2,6 +2,13 @@ import { Emage } from '../emage.js';
 import { siteConfig } from './config.js';
 export { Emage };
 export const $ = (s, root = document) => root.querySelector(s);
+export function serviceUrl(port, configured = '') {
+  if (configured) return configured;
+  const address = new URL(window.location.origin);
+  if (address.hostname.endsWith('.github.io')) return port === 3233 ? 'http://localhost:3233' : '';
+  address.port = String(port);
+  return address.origin;
+}
 /* Shared helpers, data and sidebar for every Emage page. */
 const ICONS = {
   up: 'M12 16V4M7 9l5-5 5 5M4 20h16', down: 'M12 4v12M7 11l5 5 5-5M4 20h16', bars: 'M5 20V11M12 20V4M19 20v-6',
@@ -84,7 +91,7 @@ export class Page {
     renderSidebar();
     hydrateIcons();
     const saved = readStore('emage.connection.v1', {}, sessionStorage);
-    if (!saved.baseUrl && siteConfig.apiUrl) $('#serverUrl').value = siteConfig.apiUrl;
+    if (!saved.baseUrl) $('#serverUrl').value = serviceUrl(3233, siteConfig.apiUrl);
     for (const [id, name] of [['serverUrl', 'baseUrl'], ['imgPath', 'imagePath'], ['keyInput', 'key']]) {
       if (typeof saved[name] === 'string') $('#' + id).value = saved[name];
       $('#' + id).addEventListener('change', () => { this.remember(); this.updateHost(id === 'serverUrl' ? false : undefined); });

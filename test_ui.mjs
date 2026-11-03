@@ -137,9 +137,9 @@ function file(selector, name, bytes) {
   Object.defineProperty(input, 'files', { configurable: true, value: [new dom.window.File([bytes], name)] });
   input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
 }
-async function openPage(name) {
+async function openPage(name, pageUrl = 'http://localhost:8080/') {
   dom?.window.close();
-  dom = new JSDOM(readFileSync(new URL(name === 'uploader' ? './index.html' : `./${name}.html`, import.meta.url), 'utf8'), { url: 'http://localhost:8080/', runScripts: 'outside-only' });
+  dom = new JSDOM(readFileSync(new URL(name === 'uploader' ? './index.html' : `./${name}.html`, import.meta.url), 'utf8'), { url: pageUrl, runScripts: 'outside-only' });
   dom.window.localStorage.setItem('emage:theme', 'dark');
   dom.window.eval(readFileSync(new URL('js/theme.js', import.meta.url), 'utf8'));
   dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
@@ -366,5 +366,10 @@ assert.equal($('#fsView').textContent.includes('special # &.j2k'), false);
 change('#serverUrl', 'http://other-server:3233');
 assert.equal($('#fsView button'), null, 'switching server clears stale selection');
 console.log('PASS browser: real listing, folder navigation, saved-key coverage, delete, server failure, server switch');
+globalThis.sessionStorage = storage();
+failListing = false;
+await openPage('uploader', 'http://203.0.113.10:3433/');
+assert.equal($('#serverUrl').value, 'http://203.0.113.10:3233', 'raw-IP deployment infers the API host');
+console.log('PASS cohosted client: API defaults to the page host on port 3233');
 dom.window.close();
 console.log('ALL UI INTEGRATION CHECKS PASSED');

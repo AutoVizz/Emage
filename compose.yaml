@@ -7,6 +7,6 @@ services:
       additional_contexts:
         wasm-source: ${WASM_SOURCE:-../EmageWasm}
       args:
-        EMAGE_API_URL: ${EMAGE_API_URL:-http://localhost:3233}
-        EMAGE_DEMO_URL: ${EMAGE_DEMO_URL:-http://localhost:3434}
+        EMAGE_API_URL: ${EMAGE_API_URL:-}
+        EMAGE_DEMO_URL: ${EMAGE_DEMO_URL:-}
     restart: unless-stopped

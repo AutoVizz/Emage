@@ -180,26 +180,24 @@ The optional client-only Docker Compose setup builds WASM from `WASM_SOURCE`
 (default 3433). It does not run backend services. The backend console also defaults
 to local port 3433; use a different `CLIENT_PORT` when running both locally.
 
-The backend runs .NET on 3233 and Python only on the four transfer ports
-3434–3437. Port 3434 also serves demo configuration and cancellation. The
-backend console is on 3433. There is no Python listener on 443 or 8082.
+The portable deployment runs four containers in one Compose project: static
+client on 3433, .NET API on 3233, Python proxy on 3434–3437, and an internal
+rebuild controller. `/admin` is proxied through the client on 3433. Python has
+no listener on 443 or 8082. The client/WASM image builds independently from
+the server image, using the public Emage-Wasm source.
 
-The article's **Proxy hostname / IP** field follows the shared controls, shows
-inline validation and reconnects without reloading. A bare IP uses HTTP:3434;
-a hostname uses HTTPS:3434. Full URLs override these defaults. The proxy
-advertises the same host on its four transfer ports; `DEMO_TRANSPORT_ORIGINS`
-can override public origins when external mappings differ.
+For a raw-IP HTTP deployment, the API and proxy addresses are inferred from
+the page host. The demo allows that same host's client origin automatically.
+`EMAGE_API_URL`, `EMAGE_DEMO_URL`, `DEMO_PUBLIC_ORIGIN` and
+`DEMO_TRANSPORT_ORIGINS` are optional overrides. The blog hostname/IP field
+uses the shared form style, inline validation and reconnection without reload.
 
-`DEMO_PUBLIC_ORIGIN` defaults to `https://autovizz.github.io`, without `/Emage/`.
-Remote endpoints used by the HTTPS Pages client also need HTTPS. For raw HTTP
-IP endpoints, serve the client over HTTP. Request headers `X-Demo-Latency-Ms`
-and `X-Demo-Bytes-Per-Second` select delay and rate; `X-Demo-Run` and
-`X-Demo-Lane` share a budget across gallery requests. No shaping headers means
-no added latency or bandwidth cap. PNG downloads use fetch plus object URLs
-so they can send the same headers as Emage.
+`EMAGE_UPLOAD_PASSWORD` is the only application password. It authenticates
+uploads, deletes and rebuilds at `/admin`. Rebuilds compile the API, WASM/client
+and proxy, deploy them, verify health and roll back failures. The controller
+itself stays running. No Anubis, site password or separate admin password is used.
 
-`/admin` belongs to the backend console, not the static site. The upload password
-authorizes backend builds and recovery of the API and demo proxy. It does not
-rebuild the GitHub Pages client or WASM. Client deployment uses the repository's
-Pages workflow. Server uploads, deletes and manual backend rebuilds all use
-`EMAGE_UPLOAD_PASSWORD`; there is no separate site or admin password.
+The Pages deployment remains available separately. It needs public HTTPS
+endpoints for remote API/proxy access; raw HTTP endpoints work when opening
+the HTTP-hosted client. Network shaping uses request headers, with no added
+latency or bandwidth cap when they are absent.

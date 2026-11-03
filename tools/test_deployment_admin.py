@@ -52,6 +52,18 @@ class AdminTests(unittest.TestCase):
         self.deployment.request.assert_called_once()
         self.assertNotIn(b'test-password', handler.wfile.getvalue())
 
+    def test_auto_origin_accepts_only_the_http_page_host(self):
+        self.deployment.infer_origin = True
+        self.deployment.request = Mock(return_value={'state': 'queued'})
+        handler = self.handler(body={'password': 'test-password'}, origin='http://192.0.2.10:3433')
+        handler.headers['Host'] = '192.0.2.10:3433'
+        handler.do_POST()
+        self.assertEqual(handler.status, 202)
+        handler = self.handler(body={'password': 'test-password'}, origin='http://other.example:3433')
+        handler.headers['Host'] = '192.0.2.10:3433'
+        handler.do_POST()
+        self.assertEqual(handler.status, 403)
+
     def test_missing_or_foreign_origins_cannot_request_a_rebuild(self):
         self.deployment.request = Mock()
         for origin in [None, 'https://foreign.example']:
@@ -111,7 +123,7 @@ class AdminTests(unittest.TestCase):
 
     def test_git_refs_are_resolved_without_passing_the_token_in_command_arguments(self):
         (Path(self.directory.name) / '.env').write_text('GITHUB_TOKEN=test-token\n')
-        commits = ['a' * 40, 'b' * 40]
+        commits = ['a' * 40, 'b' * 40, 'c' * 40]
         calls = []
         def remote(command, **options):
             self.assertNotIn('test-token', ' '.join(command))
@@ -123,13 +135,13 @@ class AdminTests(unittest.TestCase):
         with patch('tools.deployment_admin.subprocess.check_output', side_effect=remote):
             refs = self.deployment.resolve_refs()
         self.assertEqual(list(refs.values()), commits)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
 
     def prepare_rebuild(self):
         self.deployment.job = {'token': 'token', 'state': 'queued'}
         self.deployment.active = True
         self.deployment.containers = Mock(return_value={name: {'Image': 'sha256:old-' + name} for name in SERVICES})
-        self.deployment.resolve_refs = Mock(return_value={'SERVER_REF': 'a' * 40, 'CLIENT_REF': 'b' * 40})
+        self.deployment.resolve_refs = Mock(return_value={'SERVER_REF': 'a' * 40, 'WASM_REF': 'b' * 40, 'CLIENT_REF': 'c' * 40})
         self.deployment.failures = Mock(return_value=[])
         self.deployment.wait_ready = Mock()
 
@@ -141,8 +153,8 @@ class AdminTests(unittest.TestCase):
         self.assertIn('build', commands[0])
         self.assertIn('up', commands[1])
         self.assertNotIn('admin', commands[1])
-        self.assertEqual(commands[1][-2:], ['server', 'demo'])
-        self.assertNotIn('client', commands[0])
+        self.assertEqual(commands[1][-3:], ['server', 'client', 'demo'])
+        self.assertIn('client', commands[0])
         self.assertEqual(self.deployment.job['state'], 'succeeded')
         self.assertFalse(self.deployment.active)
 

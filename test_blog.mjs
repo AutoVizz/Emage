@@ -145,7 +145,7 @@ globalThis.fetch = async (input, options = {}) => {
   if (url.pathname === '/demo/config') return configured ? json({ ready: true, images: 10, shaping: 'headers', profiles: configured === 'old-profiles' ? {} : profiles, ...(configured === 'legacy' ? {} : { transport }) }) : new Response('No proxy', { status: 404 });
   if (url.pathname.startsWith('/demo/cancel/')) {
     assert.equal(options.method, 'POST');
-    assert.equal(url.origin, new URL(window.sessionStorage.getItem('emage.demoUrl') || window.location.origin).origin, 'Stop uses the configured control origin outside gallery pools');
+    assert.equal(url.origin, new URL(window.sessionStorage.getItem('emage.demoUrl') || (window.location.hostname.endsWith('.github.io') ? window.location.origin : new URL(window.location.protocol + '//' + window.location.hostname + ':3434').origin)).origin, 'Stop uses the configured control origin outside gallery pools');
     cancelledRuns.push(url.pathname.split('/').at(-1));
     return json({ stopped: true });
   }

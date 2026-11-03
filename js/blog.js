@@ -1,6 +1,6 @@
 import { Emage } from '../emage.js';
 import { siteConfig } from './config.js';
-import { escapeHtml, fmtBytes } from './common.js';
+import { escapeHtml, fmtBytes, serviceUrl } from './common.js';
 
 const $ = selector => document.querySelector(selector);
 const profiles = {
@@ -24,7 +24,7 @@ const runId = () => {
   return value;
 };
 const sample = selector => manifest.images.find(image => image.id === $(selector).value) || manifest.images[0];
-let demoBase = siteConfig.demoUrl || window.location.origin;
+let demoBase = serviceUrl(3434, siteConfig.demoUrl) || window.location.origin;
 try { demoBase = window.sessionStorage.getItem('emage.demoUrl') || demoBase; } catch { /* Optional browser storage. */ }
 const url = (path, origin = demoBase) => new URL(path.replace(/^\/+/, ''), origin.replace(/\/+$/, '') + '/').href;
 const hostnameInput = $('#demoServerUrl');
