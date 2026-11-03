@@ -16,4 +16,3 @@
 !tools/demo_server.py
 !tools/deployment_admin.py
 !tools/build_site.py
-!tools/nginx-certificates.sh

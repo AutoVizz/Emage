@@ -46,7 +46,6 @@ RUN python3 tools/build_site.py --wasm-dir /tmp/wasm-assets --output /tmp/site
 FROM nginx:alpine AS client
 ENV EMAGE_HOST=emage.localhost
 COPY nginx.conf /etc/nginx/templates/default.conf.template
-COPY --chmod=755 tools/nginx-certificates.sh /docker-entrypoint.d/25-emage-certificates.sh
 COPY --from=site-build /tmp/site/ /usr/share/nginx/html/
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 CMD nginx -t && wget -q --spider http://127.0.0.1/index.html && wget -q --spider http://127.0.0.1/wasm/EmageWasmEncoder.js && wget -q --spider http://127.0.0.1/wasm/EmageWasmEncoder.wasm && wget -q --spider http://127.0.0.1/wasm/EmageWasmDecoder.js && wget -q --spider http://127.0.0.1/wasm/EmageWasmDecoder.wasm
 EXPOSE 80

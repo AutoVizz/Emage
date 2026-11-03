@@ -17,15 +17,13 @@ artifacts are uploaded. Backend code, the rebuild console, `.env` files and Git
 credentials are excluded. Asset URLs work under the `/Emage/` project path.
 
 The portable deployment runs nginx, the client, API, transfer proxy and rebuild
-controller with one Compose command. The site is `https://emage.gqvz.xyz/`;
+controller with one Compose command. The site is `http://emage.gqvz.xyz/`;
 `api-emage.gqvz.xyz` forwards directly to .NET on internal port 3233.
 `api1`–`api4-emage.gqvz.xyz` forward to Python ports 3434–3437 respectively.
 Other hosts matching `*-emage.gqvz.xyz` route to Python's first listener.
-Only nginx publishes ports 80 and 443. The client discovers these HTTPS service
-addresses automatically. Certbot obtains and renews certificates for the six
-named hosts once their DNS records point to this machine and port 80 is reachable.
-Additional HTTPS subdomains need additional certificate names or DNS validation
-for a wildcard certificate; see [Certbot's DNS documentation](https://eff-certbot.readthedocs.io/en/stable/using.html#dns-plugins).
+Nginx publishes HTTP on port 80. The client discovers service addresses from the
+page's hostname and protocol. HTTPS can terminate at a reverse proxy in front
+of nginx; forward the original Host and X-Forwarded-Proto headers.
 
 The upload password is entered in the uploader and never embedded in the site.
 `/admin` uses the same password to rebuild the server, client codecs and proxy;
@@ -126,7 +124,7 @@ Dark options. System is the default; explicit choices are saved in local storage
 and applied before the page paints. Shared color variables in `css/theme.css`
 keep surfaces, controls, and feedback consistent. The selector stays usable during experiments.
 
-Start the unified deployment and open `https://emage.gqvz.xyz/blog.html`. Connect it
+Start the unified deployment and open `http://emage.gqvz.xyz/blog.html`. Connect it
 to the public HTTPS proxy hostname. For local proxy development, generate the
 fixtures and run `python3 tools/demo_server.py`; serve the static
 client separately. The Docker deployment uses Python ports 3434–3437 and .NET port 3233.
